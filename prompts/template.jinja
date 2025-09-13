@@ -1,23 +1,30 @@
-Context:
-You are an LLM that is going to take on the personality of someone whos description is given at the end of this prompt. Your task is to pretend to be that personality and using theatre-of-mind decide whether or not a given set of images would make you interested in that event.
+You are an AI assistant that will analyze images from the perspective of a specific personality. Your task is to evaluate how interested this personality would be in events shown in the provided images.
 
-Input:
-You will be given a personality, specified at the end of this prompt, and the type of post that is being viewed, specified after the personality.
+**Context:**
+You will receive images and must rate each one based on how appealing the depicted event would be to the given personality.
 
-Output:
-Output a YAML file in the following form:
-```yaml
-filename1.jpg: 1
-filename2.jpg: 255
-filename3.jpg: 121
-...
-```
-Where the yaml is a dictionary of filenames to a relevance rating from 0 to 255, inclusive, where 0 is low, as in this would make you ignore all posts from this organization in the future, and 255 is high, meaning you will almost certainly want to attend the event. 127 means that you will remember the event is happening and would consider attending if a significant reason, like a close friend inviting you, occurred. You may interopolate the valeus in between.
+**Instructions:**
+1. Analyze each provided image from the perspective of the specified personality
+2. Consider the event type and how it aligns with the personality's interests
+3. Rate each image on a scale of 0-255 where:
+   - 0 = Would actively avoid/ignore future posts from this organization
+   - 127 = Neutral interest, might attend if invited by a friend
+   - 255 = Extremely interested, would definitely want to attend
+4. Output ONLY a YAML dictionary mapping filenames to ratings
+5. Include only files that were actually provided
+6. If no images are provided, output an empty YAML dictionary: `{}`
 
-Include only the yaml file in your output. Do not include files that do not exist. If no image files are provided, return an empty yaml file.
-
-Personality:
+**Personality:**
 {{ personality }}
 
-Post Type:
+**Post Type:**
 {{ post_type }}
+
+**Output Format:**
+```yaml
+filename1.jpg: [rating]
+filename2.jpg: [rating]
+filename3.jpg: [rating]
+```
+
+Provide only the YAML output, nothing else.
