@@ -194,7 +194,7 @@ if __name__ == "__main__":
         {
             'personality': open('./prompts/alex.md').read()
         }),
-        image_paths=glob.glob("/demo/kessem/*.{jpg,jpeg,png,gif,bmp,webp}", recursive=False),
+        image_paths=glob.glob("/demo/hacj/*.{jpg,jpeg,png,gif,bmp,webp,heic}", recursive=False),
         api_key=os.environ["CLAUDE_API_KEY"],
         max_tokens=1000
     ))
