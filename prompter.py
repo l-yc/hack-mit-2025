@@ -189,12 +189,24 @@ def get_image_files_from_input(image_input: str) -> List[str]:
 
 
 if __name__ == "__main__":
+    # Change this to your directory
+    directory = "./demo/hack/"
+
+    # Match common image extensions (case-insensitive if you normalize with .lower())
+    image_extensions = ("*.jpg", "*.jpeg", "*.png", "*.heic", "*.gif", "*.bmp", "*.tiff", "*.webp")
+
+    # Collect all images
+    files = []
+    for ext in image_extensions:
+        files.extend(glob.glob(os.path.join(directory, ext)))
+
+    print(files)
     print(prompt_claude_haiku_with_images(partial_render(
         open('./prompts/template.jinja').read(),
         {
             'personality': open('./prompts/alex.md').read()
         }),
-        image_paths=glob.glob("/demo/hacj/*.{jpg,jpeg,png,gif,bmp,webp,heic}", recursive=False),
+        image_paths=files,
         api_key=os.environ["CLAUDE_API_KEY"],
-        max_tokens=1000
+        max_tokens=100000
     ))
