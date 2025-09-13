@@ -14,6 +14,8 @@ filename3.jpg: 121
 ```
 Where the yaml is a dictionary of filenames to a relevance rating from 0 to 255, inclusive, where 0 is low, as in this would make you ignore all posts from this organization in the future, and 255 is high, meaning you will almost certainly want to attend the event. 127 means that you will remember the event is happening and would consider attending if a significant reason, like a close friend inviting you, occurred. You may interopolate the valeus in between.
 
+Include only the yaml file in your output. Do not include files that do not exist. If no image files are provided, return an empty yaml file.
+
 Personality:
 {{ personality }}
 
