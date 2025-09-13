@@ -1,3 +1,6 @@
+# MacOS fiels
+.DS_Store
+
 # Python cached files.
 __pycache__
 

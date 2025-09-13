@@ -336,16 +336,19 @@ if __name__ == "__main__":
     print(files)
     
     # Example usage with streaming
-    response = prompt_claude_haiku_with_images(
-        partial_render(partial_render(
-            open('./prompts/template.jinja').read(),
-            {
-                'personality': open('./prompts/alex.md').read()
-            }
-        ), context={"post_type": "Instagram Story for a fun philosophy club."}),
-        image_paths=files,
-        api_key=os.environ["CLAUDE_API_KEY"],
-        max_tokens=4096,
-        model="claude-3-haiku-20240307",
-        stream=True  # Enable streaming
-    )
+    for agent in glob.glob('./prompts/agents/*.md'):
+        print(agent)
+        response = prompt_claude_haiku_with_images(
+            partial_render(partial_render(
+                open('./prompts/template.jinja').read(),
+                {
+                    'personality': open(agent).read()
+                }
+            ), context={"post_type": "Instagram Story for a fun philosophy club."}),
+            image_paths=files,
+            api_key=os.environ["CLAUDE_API_KEY"],
+            max_tokens=4096,
+            model="claude-3-haiku-20240307",
+            stream=False  # Enable streaming
+        )
+        print(response)
