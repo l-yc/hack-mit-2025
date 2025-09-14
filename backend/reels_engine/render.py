@@ -5,6 +5,7 @@ from typing import Optional, Tuple, List
 
 from .utils import ensure_dir
 from .vision import Segment
+from .media import probe
 
 
 def _run_ffmpeg(cmd: list[str]) -> None:
@@ -42,6 +43,37 @@ def _normalize_input(inp_path: str, out_path: str, fps: int = 30) -> str:
     return out_path
 
 
+def _get_rotation_degrees(path: str) -> int:
+    try:
+        info = probe(path) or {}
+        # ffprobe json may include rotation in stream tags or side_data_list
+        streams = info.get("streams") or []
+        if streams:
+            st0 = streams[0] or {}
+            tags = st0.get("tags") or {}
+            if "rotate" in tags:
+                return int(str(tags.get("rotate")).strip() or 0)
+            sdl = st0.get("side_data_list") or []
+            if isinstance(sdl, list) and sdl:
+                rot = sdl[0].get("rotation") if isinstance(sdl[0], dict) else None
+                if rot is not None:
+                    return int(rot)
+    except Exception:
+        pass
+    return 0
+
+
+def _rotation_prefix(path: str) -> str:
+    rot = _get_rotation_degrees(path) % 360
+    if rot == 90:
+        return "transpose=1,"
+    if rot == 270:
+        return "transpose=2,"
+    if rot == 180:
+        return "hflip,vflip,"
+    return ""
+
+
 def center_crop_render(
     input_path: str,
     output_dir: str,
@@ -62,8 +94,9 @@ def center_crop_render(
     out_mp4 = str(Path(output_dir) / "reel_1080x1920.mp4")
     cover_jpg = str(Path(output_dir) / "cover.jpg")
 
-    # Robust 9:16: scale to height, crop center if wider than 1080, else pad to 1080
+    # Robust 9:16 with orientation fix: apply rotation if needed, scale to height, crop/pad
     vf = (
+        _rotation_prefix(input_path) +
         f"scale=-2:{height},"
         "crop=w='if(gte(iw,1080),1080,iw)':h=1920:x='if(gte(iw,1080),(iw-1080)/2,0)',"
         "pad=1080:1920:(1080-iw)/2:0,"
@@ -217,6 +250,7 @@ def concat_center_crop_render(
 
         seg_out = str(seg_dir / f"seg_{idx:02d}.mp4")
         vf = (
+            _rotation_prefix(source) +
             f"scale=-2:{height},"
             "crop=w='if(gte(iw,1080),1080,iw)':h=1920:x='if(gte(iw,1080),(iw-1080)/2,0)',"
             "pad=1080:1920:(1080-iw)/2:0,"
@@ -537,13 +571,20 @@ def concat_segments_render(
     )
     for idx, seg in enumerate(segments):
         out = str(seg_dir / f"seg_{idx:02d}.mp4")
+        rot_prefix = _rotation_prefix(seg.path)
+        vf_seg = rot_prefix + vf
+        # Add a short fade-out on the last segment for smoother ending
+        if idx == len(segments) - 1:
+            dur = max(0.5, seg.t1 - seg.t0)
+            fade_d = min(0.7, dur / 2)
+            vf_seg = vf_seg + f",fade=t=out:st={max(dur - fade_d, 0):.3f}:d={fade_d:.3f}"
         cmd = [
             ffmpeg_bin,
             "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
             "-ss", f"{seg.t0:.3f}",
             "-to", f"{seg.t1:.3f}",
             "-i", seg.path,
-            "-vf", vf,
+            "-vf", vf_seg,
             "-af", "aresample=48000",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k",

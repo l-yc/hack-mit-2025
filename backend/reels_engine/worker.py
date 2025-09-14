@@ -92,7 +92,7 @@ class JobManager:
                     )
                     t0, t1 = 0.0, 0.0
                 else:
-                    # Sort by score and build an energy ramp: lower->higher
+                    # Sort by score and build an energy ramp: lower->higher (optionally add a low ending)
                     cand_segments.sort(key=lambda s: s.score)
                     total = 0.0
                     selected: list[Segment] = []
@@ -104,6 +104,11 @@ class JobManager:
                         total += dur
                         if total >= job.request.target_duration_sec:
                             break
+                    if job.request.end_with_low and cand_segments:
+                        # Try to append a short low-activity tail if time left
+                        tail = next((c for c in cand_segments if c not in selected), None)
+                        if tail and total + (tail.t1 - tail.t0) <= job.request.max_duration_sec:
+                            selected.append(tail)
                     if not selected:
                         selected = cand_segments[:2]
                     mp4_path, cover_path = concat_segments_render(selected, str(out_dir))
