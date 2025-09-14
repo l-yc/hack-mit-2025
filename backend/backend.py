@@ -175,7 +175,8 @@ Return a JSON object with fields exactly:
 {{
   "caption": "…one or two sentences…",
   "style": "short descriptor of tone",
-  "theme": "short phrase of the unifying theme"
+  "theme": "short phrase of the unifying theme",
+  "link": "link to the song being recommended"
 }}
 """
 
@@ -209,6 +210,7 @@ def get_single_song_recommendation(selected_photos, post_type, selection_context
                 "mood_keywords": obj.get("mood_keywords") or obj.get("mood") or [],
                 "platform_appropriate": obj.get("platform_appropriate", True),
                 "licensing_note": obj.get("licensing_note") or "",
+                "link": obj.get("link") or "",
             }
         except Exception:
             # very simple heuristic fallback
