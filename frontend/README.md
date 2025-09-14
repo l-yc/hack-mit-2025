@@ -1,4 +1,4 @@
-# ContentGenAI - Social Media Content Generator
+# Hyperfeed - Social Media Content Generator
 
 A full-stack web application for uploading, managing, and generating social media content using AI assistance.
 
