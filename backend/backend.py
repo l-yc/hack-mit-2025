@@ -1117,6 +1117,10 @@ def images_edit():
 
 
 # ------------------ Reels API ------------------
+@app.route("/api/reels/jobs", methods=["OPTIONS"])
+def create_reels_job_options():
+    return jsonify({"message": "Options request received"}), 200
+
 @app.route("/api/reels/jobs", methods=["POST"])
 def create_reels_job():
     if 'job_manager' not in globals() or JobRequest is None:
