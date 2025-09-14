@@ -1197,7 +1197,7 @@ def get_reels_job(job_id: str):
 
 
 # ------------------ Instagram Publish API ------------------
-def _derive_public_base_url(req, override: str | None = None) -> str:
+def _derive_public_base_url(req, override: Optional[str] = None) -> str:
     base = (override or os.environ.get("PUBLIC_BASE_URL") or request.host_url or "").strip()
     # request.host_url already ends with '/'
     if base.endswith("/"):
