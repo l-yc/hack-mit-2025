@@ -6,3 +6,12 @@ __pycache__
 
 # Pyenv files
 .python-version
+
+.env
+
+\instagram_publishing
+
+\uploads
+
+.jpg
+.png
