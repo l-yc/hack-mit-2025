@@ -1,3 +1,6 @@
 .env
-sample_publish.txt
-instagram_publishing.py
+ig_post_carousel.py
+ig_post_image.py
+ig_post_video.py
+ig_video_publish.py
+ig_publish.py
