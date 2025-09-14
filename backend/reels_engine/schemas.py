@@ -15,6 +15,9 @@ class Postpass:
 class JobRequest:
     video_url: Optional[str] = None
     video_urls: List[str] = field(default_factory=list)
+    directory: Optional[str] = None
+    max_files: int = 12
+    per_segment_sec: float = 3.0
     music_url: Optional[str] = None
     music_gain_db: float = -8.0
     duck_music: bool = True

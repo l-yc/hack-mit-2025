@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List
 
 from .utils import ensure_dir
+from .vision import Segment
 
 
 def _run_ffmpeg(cmd: list[str]) -> None:
@@ -503,4 +504,91 @@ def add_music_overlay(
     ]
     _run_ffmpeg(cmd)
     return out_mp4
+
+
+def concat_segments_render(
+    segments: List[Segment],
+    output_dir: str,
+    width: int = 1080,
+    height: int = 1920,
+    fps: int = 30,
+) -> Tuple[str, str]:
+    """
+    Trim arbitrary [t0,t1] from possibly different sources, center-crop to 9:16, then concat.
+    """
+    ensure_dir(output_dir)
+    ffmpeg_bin = os.environ.get("FFMPEG_BIN")
+    if not ffmpeg_bin:
+        try:
+            import imageio_ffmpeg  # type: ignore
+            ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            ffmpeg_bin = "ffmpeg"
+
+    seg_dir = Path(output_dir) / "segments"
+    ensure_dir(seg_dir)
+    seg_paths: List[str] = []
+
+    vf = (
+        f"scale=-2:{height},"
+        "crop=w='if(gte(iw,1080),1080,iw)':h=1920:x='if(gte(iw,1080),(iw-1080)/2,0)',"
+        "pad=1080:1920:(1080-iw)/2:0,"
+        f"fps={fps}"
+    )
+    for idx, seg in enumerate(segments):
+        out = str(seg_dir / f"seg_{idx:02d}.mp4")
+        cmd = [
+            ffmpeg_bin,
+            "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+            "-ss", f"{seg.t0:.3f}",
+            "-to", f"{seg.t1:.3f}",
+            "-i", seg.path,
+            "-vf", vf,
+            "-af", "aresample=48000",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            out,
+        ]
+        _run_ffmpeg(cmd)
+        seg_paths.append(out)
+
+    # concat list
+    list_path = Path(output_dir) / "concat.txt"
+    with open(list_path, "w", encoding="utf-8") as f:
+        f.write("ffconcat version 1.0\n")
+        for p in seg_paths:
+            f.write(f"file '{Path(p).resolve().as_posix()}'\n")
+
+    out_mp4 = str(Path(output_dir) / "reel_1080x1920.mp4")
+    cover_jpg = str(Path(output_dir) / "cover.jpg")
+    cmd_concat = [
+        ffmpeg_bin,
+        "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-f", "concat", "-safe", "0",
+        "-i", str(list_path),
+        "-c", "copy",
+        out_mp4,
+    ]
+    try:
+        _run_ffmpeg(cmd_concat)
+    except Exception:
+        cmd_concat = [
+            ffmpeg_bin,
+            "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+            "-f", "concat", "-safe", "0",
+            "-i", str(list_path),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            out_mp4,
+        ]
+        _run_ffmpeg(cmd_concat)
+
+    # cover from first segment
+    cover_cmd = [
+        ffmpeg_bin, "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-ss", "0.5", "-i", seg_paths[0], "-vframes", "1", cover_jpg,
+    ]
+    _run_ffmpeg(cover_cmd)
+    return out_mp4, cover_jpg
+
 

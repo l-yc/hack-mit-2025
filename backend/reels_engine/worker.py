@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from .media import download, download_many, probe
-from .render import center_crop_render, concat_center_crop_render, add_music_overlay
+from .render import center_crop_render, concat_center_crop_render, add_music_overlay, concat_segments_render
+from .vision import score_motion_segments, Segment
 from .schemas import Job, JobRequest, ArtifactPaths
 from .utils import ensure_dir, write_json
 
@@ -59,7 +60,14 @@ class JobManager:
             tmp_dir = str(Path(self.uploads_root) / "tmp" / job.id)
             ensure_dir(tmp_dir)
             inputs: list[str]
-            if job.request.video_urls:
+            if job.request.directory:
+                import glob
+                patt = os.path.join(job.request.directory, "*.mp4")
+                files = glob.glob(patt)
+                if not files:
+                    raise ValueError(f"No mp4 files found in {job.request.directory}")
+                inputs = files[: max(2, min(job.request.max_files, len(files)))]
+            elif job.request.video_urls:
                 inputs = download_many(job.request.video_urls, tmp_dir)
             elif job.request.video_url:
                 inputs = [download(job.request.video_url, tmp_dir)]
@@ -68,14 +76,39 @@ class JobManager:
 
             # Minimal selection: single vs montage concat
             if job.request.mode == "montage" and len(inputs) > 1:
-                # Disable crossfade for reliability; pure concat path
-                mp4_path, cover_path = concat_center_crop_render(
-                    inputs=inputs,
-                    output_dir=str(out_dir),
-                    crossfade_sec=None,
-                )
-                t0, t1 = 0.0, 0.0
-                # If music provided, overlay on top of concatenated video
+                # Score motion segments per input
+                cand_segments: list[Segment] = []
+                for p in inputs:
+                    cand_segments.extend(
+                        score_motion_segments(p, per_segment_sec=job.request.per_segment_sec, target_fps=10, max_segments=5)
+                    )
+                if not cand_segments:
+                    # Fallback: simple concat of first two full inputs (trim per_segment)
+                    mp4_path, cover_path = concat_center_crop_render(
+                        inputs=inputs,
+                        output_dir=str(out_dir),
+                        crossfade_sec=None,
+                        per_segment_sec=job.request.per_segment_sec,
+                    )
+                    t0, t1 = 0.0, 0.0
+                else:
+                    # Sort by score and build an energy ramp: lower->higher
+                    cand_segments.sort(key=lambda s: s.score)
+                    total = 0.0
+                    selected: list[Segment] = []
+                    for seg in cand_segments:
+                        dur = seg.t1 - seg.t0
+                        if total + dur > job.request.max_duration_sec:
+                            break
+                        selected.append(seg)
+                        total += dur
+                        if total >= job.request.target_duration_sec:
+                            break
+                    if not selected:
+                        selected = cand_segments[:2]
+                    mp4_path, cover_path = concat_segments_render(selected, str(out_dir))
+
+                # If music provided, overlay on top with optional music-only
                 if job.request.music_url:
                     mp4_path = add_music_overlay(
                         input_video_path=mp4_path,
@@ -85,6 +118,7 @@ class JobManager:
                         duck_music=job.request.duck_music,
                         music_only=job.request.music_only,
                     )
+                t0, t1 = 0.0, 0.0
             else:
                 local_path = inputs[0]
                 _ = probe(local_path)

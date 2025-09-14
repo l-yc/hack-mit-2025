@@ -576,12 +576,14 @@ def create_reels_job():
 
         video_url = data.get("video_url")
         video_urls = data.get("video_urls") or []
-        if not video_url and not video_urls:
-            return jsonify({"error": "Provide 'video_url' or 'video_urls'"}), 400
+        directory = data.get("directory")
+        if not video_url and not video_urls and not directory:
+            return jsonify({"error": "Provide 'video_url' or 'video_urls' or 'directory'"}), 400
 
         req = JobRequest(
             video_url=video_url,
             video_urls=video_urls,
+            directory=directory,
             mode=data.get("mode", "single"),
             target_duration_sec=float(data.get("target_duration_sec", 15)),
             min_duration_sec=float(data.get("min_duration_sec", 9)),
@@ -590,6 +592,8 @@ def create_reels_job():
             speech_mode=bool(data.get("speech_mode", True)),
             music_mode=bool(data.get("music_mode", False)),
             top_k_candidates=int(data.get("top_k_candidates", 3)),
+            per_segment_sec=float(data.get("per_segment_sec", 3.0)),
+            max_files=int(data.get("max_files", 12)),
             keywords=list(data.get("keywords", [])),
             brand_faces_whitelist=list(data.get("brand_faces_whitelist", [])),
             crop_safe_margin_pct=float(data.get("crop_safe_margin_pct", 0.05)),
