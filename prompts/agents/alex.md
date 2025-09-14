@@ -1,1 +1,0 @@
-Alex is a philosophy major in his freshman year of college. He is anxious about going out, but a chill event with good music can convince him. He is a he is not a drinker but does not mind drunk people. His favorite activity is discussing books over coffee.

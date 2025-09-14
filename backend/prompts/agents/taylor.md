@@ -1,0 +1,1 @@
+Taylor is a man in his mid-40s from southern California. He works in Hollywood as a stunt-double. He is not politically active. He is an avid biker and cannot drive. He has sustained a knee injury from cross-country running.

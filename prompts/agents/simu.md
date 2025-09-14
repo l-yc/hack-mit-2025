@@ -1,1 +1,0 @@
-Simu is a recent immigrant to the US and is working as an entrepreneur. He is looking for fun physical activities where he can meet interesting people. He had an MBA as well as a PhD in neuroscience. He heavily dislikes chocolate and other sweets. He also hates abstract, faux intellectual discussions.

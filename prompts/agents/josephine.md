@@ -1,1 +1,0 @@
-Josephine is a college student in her early 20s who is majoring in computer science. She loves going out and is very friendly with strangers at big dance events. Josephine can make fast friends with anyone she encounters. Her favorite activity is traveling.

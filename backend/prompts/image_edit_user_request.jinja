@@ -1,0 +1,26 @@
+# User Input Edit Prompt
+
+Objective: Apply ONLY the requested change while keeping everything else exactly the same.
+
+Requested change:
+{{ edit_request }}
+
+Strict rules:
+- Do not alter the rest of the image beyond what is strictly necessary to satisfy the request.
+- Preserve composition, lighting, color palette, identities, and textures.
+- Match the existing scene’s perspective, scale, shadows, reflections, and materials.
+- If adding or replacing an element, integrate seamlessly (edges, lighting, shadows, reflections, and noise profile).
+- If removing an element, inpaint background plausibly and consistently.
+
+Prohibited changes:
+- No additional style changes, retouching, or enhancements unless explicitly requested.
+- No deletions or additions other than what is specified above.
+
+Output constraints:
+- Photorealistic output that blends with the original image.
+- Maintain aspect ratio and resolution (or nearest available resolution if required by the model).
+
+Instruction:
+Make the single requested change described in {{ edit_request }} and return an image otherwise identical to the original.
+
+

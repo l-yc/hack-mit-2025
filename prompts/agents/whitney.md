@@ -1,1 +1,0 @@
-Whitney is an accountant in her 60's from Scotsboro, Alabama. She works in an actuarial capacity at the local H&R block. She loves her job and thinks of her coworkers as her family. She brings cookies to work every Friday and volunteers at the local soup kitchen.
