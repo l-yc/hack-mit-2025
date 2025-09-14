@@ -3,6 +3,8 @@ import os
 import re
 import uuid
 import yaml
+import requests
+import traceback
 
 from collections import defaultdict
 from datetime import datetime
@@ -613,7 +615,8 @@ def select_photos_from_directory(
         return [Path(file) for file, score in score_per_file[:imgs]]
 
     except Exception as e:
-        print(f"Error in photo selection: {e.__traceback__}")
+        print(f"Error in photo selection: {e}")
+        traceback.print_tb(e.__traceback__)
         # Fallback: return most recent photos
         files_with_time = [(f, os.path.getmtime(f)) for f in files]
         files_with_time.sort(key=lambda x: x[1], reverse=True)
