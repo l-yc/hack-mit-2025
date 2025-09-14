@@ -1,6 +1,7 @@
 import glob
 import os
 import re
+from typing import Optional
 import uuid
 import yaml
 import json
@@ -111,6 +112,137 @@ def _anthropic_request_with_fallbacks(content: str, max_tokens: int, candidates:
     raise Exception(f"Anthropic request failed for {candidates}. Last error: {last_error}")
 
 
+def _build_song_search_urls(title: str, artist: str) -> dict:
+    """Return platform search URLs as fallbacks."""
+    q = f"{title} {artist}".strip() if title or artist else title or artist or ""
+    q_enc = requests.utils.quote(q or "")
+    return {
+        "spotify_search":  f"https://open.spotify.com/search/{q_enc}",
+        "youtube_search":  f"https://www.youtube.com/results?search_query={q_enc}",
+        "apple_search":    f"https://music.apple.com/us/search?term={q_enc}",
+        "soundcloud_search": f"https://soundcloud.com/search?q={q_enc}",
+    }
+
+def resolve_song_links(title: str, artist: str, country: Optional[str] = None) -> dict:
+    """
+    Best-effort: use iTunes Search API (no auth) to fetch a concrete track link,
+    plus platform search fallbacks. Returns:
+    {
+      "best_link": "https://music.apple.com/…",  # or None
+      "apple_track_url": "...",   # may be None
+      "apple_preview_url": "...", # 30s preview if provided
+      "search": { "spotify_search": "...", "youtube_search":"...", ... }
+    }
+    """
+    links = {"best_link": None, "apple_track_url": None, "apple_preview_url": None}
+    links["search"] = _build_song_search_urls(title, artist)
+
+    term = " ".join(x for x in [title, artist] if x).strip()
+    if not term:
+        return links
+
+    try:
+        params = {
+            "term": term,
+            "entity": "song",
+            "limit": 1,
+            "country": (country or os.environ.get("ITUNES_COUNTRY") or "US")
+        }
+        resp = requests.get("https://itunes.apple.com/search", params=params, timeout=10)
+        if resp.ok:
+            data = resp.json()
+            if data.get("resultCount", 0) > 0:
+                r0 = data["results"][0]
+                # Prefer trackViewUrl; fall back to collectionViewUrl
+                apple_url = r0.get("trackViewUrl") or r0.get("collectionViewUrl")
+                preview = r0.get("previewUrl")
+                links["apple_track_url"] = apple_url
+                links["apple_preview_url"] = preview
+                links["best_link"] = apple_url or links["search"]["spotify_search"]
+    except Exception:
+        # Non-fatal; keep fallbacks
+        pass
+
+    return links
+
+
+# --- CLEANUP HELPERS ----------------------------------------------------------
+def _build_cleanup_prompt_for_post(post_type: str, selection_context: dict) -> str:
+    """
+    Craft a cleanup instruction tailored to the post and the agent context.
+    Keeps the default cleanup goals but nudges style to match the theme/agents.
+    """
+    base = (
+        "Clean up the photo: remove noise and compression artifacts, fix white balance, "
+        "enhance sharpness, improve exposure and contrast, recover natural skin tones "
+        "and preserve realistic colors and lighting."
+    )
+    # Light touch styling hints (won't overcook faces/skin tones)
+    theme = selection_context.get("identified_themes") or []
+    agents = selection_context.get("agent_descriptions") or {}
+    agent_names = ", ".join(sorted(agents.keys())) if agents else "general"
+    selected_files = selection_context.get("selected_photos") or []
+
+    # Keep this concise; Gemini does well with short, specific guidance.
+    extras = [
+        f"Post type: {post_type}.",
+        ("Emphasize a cohesive look across these images: "
+         f"{', '.join(selected_files[:6])}{' …' if len(selected_files) > 6 else ''}."),
+        f"Respect natural skin tones and textures; avoid plastic-looking smoothing.",
+        f"Maintain realism; avoid stylization. If highlights are clipped, recover gently.",
+        f"Tone guidance from agents ({agent_names}).",
+    ]
+    if theme:
+        extras.append(f"Subtle bias toward themes: {', '.join(theme[:5])}.")
+    return base + " " + " ".join(extras)
+
+
+def _cleanup_selected_photos_with_gemini(
+    selected_photos: list[Path],
+    post_type: str,
+    selection_context: dict,
+) -> tuple[list[Path], dict]:
+    """
+    Runs cleanup on each selected photo using backend.image_editor.cleanup_image (Gemini).
+    Returns (cleaned_paths, meta) where cleaned_paths preserves order.
+    Falls back to original image on per-file failure, tracking errors in meta['failures'].
+    """
+    meta = {"enabled": False, "model": None, "failures": []}
+    if not selected_photos:
+        return selected_photos, meta
+
+    try:
+        # Import here to avoid raising at module import if deps not installed
+        from backend.image_editor import cleanup_image, DEFAULT_GEMINI_MODEL  # type: ignore
+    except Exception as e:
+        # Cleanup unavailable; return originals
+        meta["failures"].append(f"cleanup unavailable: {e}")
+        return selected_photos, meta
+
+    prompt = _build_cleanup_prompt_for_post(post_type, selection_context)
+    meta["enabled"] = True
+    meta["model"] = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image-preview")
+
+    cleaned_paths: list[Path] = []
+    for p in selected_photos:
+        try:
+            res = cleanup_image(
+                input_path=str(p),
+                # keep under uploads/cleaned so /photos/<path> can serve it
+                output_dir=os.path.join(app.config["UPLOAD_FOLDER"], "cleaned"),
+                prompt=prompt,
+                model_name=meta["model"],
+                provider="gemini",
+            )
+            cleaned_paths.append(Path(res.output_path))
+        except Exception as e:
+            # Per-file fallback: use original; record reason
+            meta["failures"].append(f"{os.path.basename(p)}: {e}")
+            cleaned_paths.append(p)
+
+    return cleaned_paths, meta
+
+
 # --- Single-post caption + song helpers ---------------------------------------
 def generate_post_caption(selected_photos, post_type, selection_context):
     """
@@ -184,7 +316,8 @@ Return a JSON object with fields exactly:
 def get_single_song_recommendation(selected_photos, post_type, selection_context):
     """
     Recommend ONE song that best fits the entire post.
-    Returns a dict with keys like: title, artist, genre, coherence_reason, etc.
+    Returns a dict with keys like: title, artist, genre, coherence_reason, energy_level,
+    mood_keywords, platform_appropriate, licensing_note, link, links.
     """
     prompt = _create_single_song_prompt(selected_photos, post_type, selection_context)
     try:
@@ -195,30 +328,77 @@ def get_single_song_recommendation(selected_photos, post_type, selection_context
         )
         text = result["content"][0]["text"]
 
-        # Expect a single JSON object; fallback to parse
         try:
             start = text.find("{")
             end = text.rfind("}") + 1
             obj = json.loads(text[start:end]) if start != -1 and end > start else json.loads(text)
-            # minimal normalization
+
+            title  = (obj.get("title") or "").strip()
+            artist = (obj.get("artist") or "").strip()
+
+            # If the model already provided a link, keep it; otherwise resolve one.
+            model_link = (obj.get("link") or "").strip()
+            resolved = resolve_song_links(title, artist)
+
+            link = model_link or resolved.get("best_link") or resolved["search"]["spotify_search"]
+
             return {
-                "title": obj.get("title") or "",
-                "artist": obj.get("artist") or "",
+                "title": title,
+                "artist": artist,
                 "genre": obj.get("genre") or "",
                 "coherence_reason": obj.get("coherence_reason") or obj.get("reason") or "",
                 "energy_level": obj.get("energy_level") or obj.get("energy") or "",
                 "mood_keywords": obj.get("mood_keywords") or obj.get("mood") or [],
                 "platform_appropriate": obj.get("platform_appropriate", True),
                 "licensing_note": obj.get("licensing_note") or "",
-                "link": obj.get("link") or "",
+                "link": link,
+                "links": {
+                    "apple_track_url": resolved.get("apple_track_url"),
+                    "apple_preview_url": resolved.get("apple_preview_url"),
+                    **resolved.get("search", {}),
+                },
             }
         except Exception:
-            # very simple heuristic fallback
+            # Heuristic fallback
             lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-            guess = {"title": "", "artist": "", "genre": "", "coherence_reason": lines[0] if lines else ""}
-            return guess
+            guess_title = ""
+            guess_artist = ""
+            if lines:
+                # Very rough extraction: "Title — Artist" or "Title - Artist"
+                parts = re.split(r"\s+[—-]\s+", lines[0], maxsplit=1)
+                if len(parts) == 2:
+                    guess_title, guess_artist = parts[0], parts[1]
+            resolved = resolve_song_links(guess_title, guess_artist)
+            return {
+                "title": guess_title,
+                "artist": guess_artist,
+                "genre": "",
+                "coherence_reason": lines[0] if lines else "",
+                "energy_level": "",
+                "mood_keywords": [],
+                "platform_appropriate": True,
+                "licensing_note": "",
+                "link": resolved.get("best_link") or resolved["search"]["spotify_search"],
+                "links": {
+                    "apple_track_url": resolved.get("apple_track_url"),
+                    "apple_preview_url": resolved.get("apple_preview_url"),
+                    **resolved.get("search", {}),
+                },
+            }
     except Exception as e:
-        return {"title": "", "artist": "", "genre": "", "coherence_reason": "", "error": str(e)}
+        return {
+            "title": "",
+            "artist": "",
+            "genre": "",
+            "coherence_reason": "",
+            "energy_level": "",
+            "mood_keywords": [],
+            "platform_appropriate": True,
+            "licensing_note": "",
+            "link": "",
+            "links": _build_song_search_urls("", ""),
+            "error": str(e),
+        }
 
 
 def _create_single_song_prompt(selected_photos, post_type, selection_context):
@@ -908,17 +1088,62 @@ def select_top_photos():
         # Ensure the context knows which photos (by filename) were selected
         selection_context["selected_photos"] = [os.path.basename(p) for p in selected_photos]
 
-        # --- NEW: Generate ONE caption for the entire post
-        post_caption = generate_post_caption(selected_photos, post_type, selection_context)
+        # --- NEW: Auto-cleanup selected photos with Gemini (graceful fallback)
+        auto_cleanup = data.get("auto_cleanup", True)
+        cleaned_meta = {"enabled": False, "model": None, "failures": []}
+        photos_to_return = selected_photos
+        if auto_cleanup:
+            photos_to_return, cleaned_meta = _cleanup_selected_photos_with_gemini(
+                selected_photos,
+                post_type,
+                selection_context,
+            )
 
-        # --- NEW: Get ONE song recommendation for the entire post
+        # Format photo response (use cleaned paths when available)
+        result_photos = []
+        for orig_path, final_path in zip(selected_photos, photos_to_return):
+            filename = os.path.basename(final_path)
+            file_size = os.path.getsize(final_path)
+            modified_time = datetime.fromtimestamp(os.path.getmtime(final_path)).isoformat()
+
+            # Create a URL usable by GET /photos/<path:filename>. We want a path relative to uploads/
+            try:
+                rel_path = os.path.relpath(final_path, start=app.config["UPLOAD_FOLDER"]).replace("\\", "/")
+                file_url = f"/photos/{rel_path}"
+            except Exception:
+                # If the image isn't under uploads/, omit URL (still return metadata)
+                file_url = None
+
+            result_photos.append(
+                {
+                    "filename": filename,
+                    "original_filename": os.path.basename(orig_path),
+                    "file_path": str(final_path),
+                    "size_bytes": file_size,
+                    "modified_time": modified_time,
+                    "file_url": file_url,
+                    "cleaned": (Path(final_path) != Path(orig_path)),
+                }
+            )
+
+        # --- NEW: Include cleanup meta in the response
+        cleanup_info = {
+            "enabled": cleaned_meta.get("enabled", False),
+            "model": cleaned_meta.get("model"),
+            "failures": cleaned_meta.get("failures", []),
+            "prompt_strategy": "post-aware global cleanup tuned to agent themes",
+        }
+
+        # --- Generate ONE caption for the entire post
+        post_caption = generate_post_caption(photos_to_return, post_type, selection_context)
+
+        # --- Get ONE song recommendation for the entire post
         song_recommendation = {}
         try:
             song_recommendation = get_single_song_recommendation(
-                selected_photos, post_type, selection_context
+                photos_to_return, post_type, selection_context
             )
         except Exception as e:
-            # Non-fatal: still return the rest
             song_recommendation = {"title": "", "artist": "", "error": str(e)}
 
         # Build response (single caption + single song)
@@ -929,12 +1154,13 @@ def select_top_photos():
             "agents_used": len(agents),
             "directory": img_dir,
             "post_type": post_type,
-            "selected_photos": result_photos,
-            "post_caption": post_caption,                 # <-- single caption
-            "song_recommendation": song_recommendation,   # <-- single song
+            "selected_photos": result_photos,   # <-- now these are cleaned when possible
+            "cleanup": cleanup_info,            # <-- new meta block
+            "post_caption": post_caption,
+            "song_recommendation": song_recommendation,
             "selection_time": datetime.now().isoformat(),
         }
-        
+
         return jsonify(response_data), 200
         
     except Exception as e:
