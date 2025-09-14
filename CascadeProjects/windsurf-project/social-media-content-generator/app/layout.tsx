@@ -2,12 +2,13 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import Sidebar from './components/Sidebar'
+import { AppProvider } from '@/lib/context'
 
 const inter = Inter({ subsets: ['latin'] })
 
-export const metadata: Metadata = {
-  title: 'Social Media Content Generator',
-  description: 'Generate amazing social media content from your photos',
+export const metadata = {
+  title: 'ContentGenAI',
+  description: 'AI-powered social media content generator',
 }
 
 export default function RootLayout({
@@ -17,13 +18,15 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={`${inter.className} min-h-screen bg-gray-50`}>
-        <div className="flex h-screen">
-          <Sidebar />
-          <main className="flex-1 overflow-auto">
-            {children}
-          </main>
-        </div>
+      <body className={`${inter.className} min-h-screen bg-gray-50`} suppressHydrationWarning={true}>
+        <AppProvider>
+          <div className="flex h-screen">
+            <Sidebar />
+            <main className="flex-1 overflow-auto">
+              {children}
+            </main>
+          </div>
+        </AppProvider>
       </body>
     </html>
   )

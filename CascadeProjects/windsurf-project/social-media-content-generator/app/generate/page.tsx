@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from 'react';
-import { PaperAirplaneIcon, PhotoIcon, PlusIcon, ArrowPathIcon, ArrowDownTrayIcon, ShareIcon } from '@heroicons/react/24/outline';
+import { PaperAirplaneIcon, ArrowDownTrayIcon, ShareIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import { useAppContext } from '@/lib/context';
 
 type Asset = {
   id: string;
@@ -59,27 +60,35 @@ const contentTypes: ContentType[] = [
 ];
 
 export default function GenerateContentPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const {
+    selectedContentType,
+    setSelectedContentType,
+    messages,
+    setMessages,
+    chatFlow,
+    setChatFlow,
+    selectedAssets,
+    setSelectedAssets,
+    postCaption,
+    setPostCaption,
+    userPurpose,
+    setUserPurpose,
+    userTarget,
+    setUserTarget,
+    selectedProject,
+    setSelectedProject,
+    currentImageIndex,
+    setCurrentImageIndex,
+    assets
+  } = useAppContext();
+
+  const [showContentTypes, setShowContentTypes] = useState(!selectedContentType);
   const [inputMessage, setInputMessage] = useState('');
-  const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [editableContent, setEditableContent] = useState('');
-  const [selectedContentType, setSelectedContentType] = useState<ContentType | null>(null);
-  const [showContentTypes, setShowContentTypes] = useState(true);
-  const [chatFlow, setChatFlow] = useState<'purpose' | 'project' | 'generating' | 'complete'>('purpose');
-  const [userPurpose, setUserPurpose] = useState('');
-  const [userTarget, setUserTarget] = useState('');
-  const [selectedProject, setSelectedProject] = useState('');
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [postCaption, setPostCaption] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Mock assets
-  const [availableAssets] = useState<Asset[]>([
-    { id: '1', name: 'beach.jpg', type: 'image', url: '/api/placeholder/150/150' },
-    { id: '2', name: 'mountain.jpg', type: 'image', url: '/api/placeholder/150/150' },
-    { id: '3', name: 'sunset.jpg', type: 'image', url: '/api/placeholder/150/150' },
-  ]);
+  // Load assets from Supabase
+  const [availableAssets, setAvailableAssets] = useState<Asset[]>([]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -88,6 +97,30 @@ export default function GenerateContentPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Load assets from API on component mount
+  useEffect(() => {
+    const fetchAssets = async () => {
+      try {
+        const response = await fetch('/api/assets');
+        const data = await response.json();
+        if (data.assets) {
+          // Convert Supabase assets to Generate page format
+          const convertedAssets = data.assets.map((asset: any) => ({
+            id: asset.id.toString(),
+            name: asset.name,
+            url: asset.url,
+            type: asset.type.startsWith('image') ? 'image' : 'video'
+          }));
+          setAvailableAssets(convertedAssets);
+        }
+      } catch (error) {
+        console.error('Error fetching assets:', error);
+      }
+    };
+
+    fetchAssets();
+  }, []);
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
@@ -202,12 +235,60 @@ export default function GenerateContentPage() {
     ]);
   };
 
+  const [isSliding, setIsSliding] = useState(false);
+  const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null);
+  const [dragStart, setDragStart] = useState<number | null>(null);
+  const [dragOffset, setDragOffset] = useState(0);
+
   const nextImage = () => {
-    setCurrentImageIndex((prev) => (prev + 1) % selectedAssets.length);
+    if (isSliding) return;
+    setIsSliding(true);
+    setSlideDirection('left');
+    setTimeout(() => {
+      setCurrentImageIndex((prev) => (prev + 1) % selectedAssets.length);
+      setSlideDirection(null);
+      setIsSliding(false);
+    }, 300);
   };
 
   const prevImage = () => {
-    setCurrentImageIndex((prev) => (prev - 1 + selectedAssets.length) % selectedAssets.length);
+    if (isSliding) return;
+    setIsSliding(true);
+    setSlideDirection('right');
+    setTimeout(() => {
+      setCurrentImageIndex((prev) => (prev - 1 + selectedAssets.length) % selectedAssets.length);
+      setSlideDirection(null);
+      setIsSliding(false);
+    }, 300);
+  };
+
+  const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    setDragStart(clientX);
+    setDragOffset(0);
+  };
+
+  const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
+    if (dragStart === null) return;
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const offset = clientX - dragStart;
+    setDragOffset(offset);
+  };
+
+  const handleDragEnd = () => {
+    if (dragStart === null) return;
+    
+    const threshold = 50; // minimum drag distance to trigger navigation
+    if (Math.abs(dragOffset) > threshold) {
+      if (dragOffset > 0) {
+        prevImage();
+      } else {
+        nextImage();
+      }
+    }
+    
+    setDragStart(null);
+    setDragOffset(0);
   };
 
   return (
@@ -224,25 +305,45 @@ export default function GenerateContentPage() {
                 {selectedContentType ? 'Create your Instagram post' : 'Select the type of content you want to create'}
               </p>
             </div>
-            {selectedContentType && (
-              <button
-                onClick={() => {
-                  setSelectedContentType(null);
-                  setShowContentTypes(true);
-                  setMessages([]);
-                  setPostCaption('');
-                  setSelectedAssets([]);
-                  setChatFlow('purpose');
-                }}
-                className="px-4 py-2 text-sm text-purple-600 hover:text-purple-700 border border-purple-300 rounded-lg hover:bg-purple-50"
-              >
-                Change Type
-              </button>
-            )}
+            <div className="flex items-center space-x-2">
+              {selectedContentType && (
+                <button
+                  onClick={() => {
+                    setSelectedContentType(null);
+                    setShowContentTypes(true);
+                    setMessages([]);
+                    setPostCaption('');
+                    setSelectedAssets([]);
+                    setChatFlow('purpose');
+                  }}
+                  className="px-4 py-2 text-sm text-purple-600 hover:text-purple-700 border border-purple-300 rounded-lg hover:bg-purple-50 cursor-pointer"
+                >
+                  Change Type
+                </button>
+              )}
+              {selectedContentType && chatFlow === 'complete' && selectedAssets.length > 0 && (
+                <>
+                  <button
+                    onClick={downloadContent}
+                    className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer"
+                  >
+                    <ArrowDownTrayIcon className="h-4 w-4 mr-1" />
+                    Save
+                  </button>
+                  <button
+                    onClick={postToInstagram}
+                    className="flex items-center px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors cursor-pointer"
+                  >
+                    <ShareIcon className="h-4 w-4 mr-1" />
+                    Share
+                  </button>
+                </>
+              )} 
+            </div>
           </div>
         </div>
         
-        <div className="flex-1 p-6">
+        <div className="flex-1 p-6 overflow-y-auto">
           {showContentTypes && !selectedContentType ? (
             <div className="space-y-6">
               <div className="text-center mb-8">
@@ -268,44 +369,65 @@ export default function GenerateContentPage() {
             </div>
           ) : chatFlow === 'complete' && selectedAssets.length > 0 ? (
             <div className="space-y-6">
-              {/* Header with export buttons */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <span className="text-2xl">{selectedContentType?.icon}</span>
-                  <div>
-                    <h3 className="font-medium text-gray-900">{selectedContentType?.name}</h3>
-                    <p className="text-sm text-gray-500">{selectedContentType?.dimensions}</p>
-                  </div>
-                </div>
-                <div className="flex space-x-2">
-                  <button
-                    onClick={downloadContent}
-                    className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-                  >
-                    <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
-                    Export
-                  </button>
-                  <button
-                    onClick={postToInstagram}
-                    className="flex items-center px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
-                  >
-                    <ShareIcon className="h-4 w-4 mr-2" />
-                    Post to Instagram
-                  </button>
-                </div>
-              </div>
 
               {/* Image Carousel */}
               <div className="bg-gray-50 rounded-lg p-6">
-                <h3 className="text-sm font-medium text-gray-900 mb-4">Selected Images</h3>
                 <div className="relative">
-                  <div className="aspect-square bg-white rounded-lg overflow-hidden border border-gray-200 max-w-md mx-auto">
+                  <div 
+                    className="aspect-square bg-white rounded-lg overflow-hidden border border-gray-200 max-w-md mx-auto cursor-grab active:cursor-grabbing"
+                    onMouseDown={handleDragStart}
+                    onMouseMove={handleDragMove}
+                    onMouseUp={handleDragEnd}
+                    onMouseLeave={handleDragEnd}
+                    onTouchStart={handleDragStart}
+                    onTouchMove={handleDragMove}
+                    onTouchEnd={handleDragEnd}
+                  >
                     {selectedAssets.length > 0 && (
-                      <img
-                        src={selectedAssets[currentImageIndex]?.url || '/api/placeholder/400/400'}
-                        alt={selectedAssets[currentImageIndex]?.name || 'Selected asset'}
-                        className="w-full h-full object-cover"
-                      />
+                      <div className="relative w-full h-full overflow-hidden">
+                        {/* Image Container - slides as one unit */}
+                        <div 
+                          className={`flex ${slideDirection ? 'transition-transform duration-300 ease-out' : ''}`}
+                          style={{
+                            transform: `translateX(calc(-33.333% + ${dragOffset * 0.5}px)) ${
+                              slideDirection === 'left' ? 'translateX(-33.333%)' : 
+                              slideDirection === 'right' ? 'translateX(33.333%)' : ''
+                            }`,
+                            width: '300%',
+                            height: '100%'
+                          }}
+                        >
+                          {/* Previous Image */}
+                          <div className="flex-shrink-0" style={{ width: '33.333%', height: '100%' }}>
+                            <img
+                              src={selectedAssets[(currentImageIndex - 1 + selectedAssets.length) % selectedAssets.length]?.url || '/api/placeholder/400/400'}
+                              alt="Previous image"
+                              className="w-full h-full object-cover select-none"
+                              draggable={false}
+                            />
+                          </div>
+                          
+                          {/* Current Image */}
+                          <div className="flex-shrink-0" style={{ width: '33.333%', height: '100%' }}>
+                            <img
+                              src={selectedAssets[currentImageIndex]?.url || '/api/placeholder/400/400'}
+                              alt={selectedAssets[currentImageIndex]?.name || 'Selected asset'}
+                              className="w-full h-full object-cover select-none"
+                              draggable={false}
+                            />
+                          </div>
+                          
+                          {/* Next Image */}
+                          <div className="flex-shrink-0" style={{ width: '33.333%', height: '100%' }}>
+                            <img
+                              src={selectedAssets[(currentImageIndex + 1) % selectedAssets.length]?.url || '/api/placeholder/400/400'}
+                              alt="Next image"
+                              className="w-full h-full object-cover select-none"
+                              draggable={false}
+                            />
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
                   
@@ -314,7 +436,8 @@ export default function GenerateContentPage() {
                     <>
                       <button
                         onClick={prevImage}
-                        className="absolute left-2 top-1/2 transform -translate-y-1/2 bg-white/80 hover:bg-white rounded-full p-2 shadow-lg transition-colors"
+                        disabled={isSliding}
+                        className="absolute left-2 top-1/2 transform -translate-y-1/2 bg-gray-100 hover:bg-gray-200 p-2 transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed rounded-md"
                       >
                         <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -322,7 +445,8 @@ export default function GenerateContentPage() {
                       </button>
                       <button
                         onClick={nextImage}
-                        className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-white/80 hover:bg-white rounded-full p-2 shadow-lg transition-colors"
+                        disabled={isSliding}
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-gray-100 hover:bg-gray-200 p-2 transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed rounded-md"
                       >
                         <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -338,7 +462,7 @@ export default function GenerateContentPage() {
                         <button
                           key={index}
                           onClick={() => setCurrentImageIndex(index)}
-                          className={`w-2 h-2 rounded-full transition-colors ${
+                          className={`w-2 h-2 rounded-full transition-colors cursor-pointer ${
                             index === currentImageIndex ? 'bg-purple-500' : 'bg-gray-300'
                           }`}
                         />
@@ -382,112 +506,80 @@ export default function GenerateContentPage() {
       </div>
 
       {/* Right - Chat Interface */}
-      <div className="w-96 flex flex-col bg-white">
-        <div className="p-4 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">AI Assistant</h3>
-          <p className="text-sm text-gray-500">Chat to generate content</p>
-        </div>
+      {selectedContentType && (
+        <div className="w-96 flex flex-col bg-white">
+          <div className="p-4 border-b border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900">AI Assistant</h3>
+            <p className="text-sm text-gray-500">Chat to generate content</p>
+          </div>
 
-        {/* Assets Selection */}
-        <div className="p-4 border-b border-gray-200">
-          <h4 className="text-sm font-medium text-gray-700 mb-2">Select Assets</h4>
-          <div className="grid grid-cols-3 gap-2">
-            {availableAssets.map((asset) => (
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {messages.map((message) => (
               <div
-                key={asset.id}
-                onClick={() => toggleAssetSelection(asset)}
-                className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${
-                  selectedAssets.find(a => a.id === asset.id)
-                    ? 'border-purple-500 ring-2 ring-purple-200'
-                    : 'border-gray-200 hover:border-purple-300'
-                }`}
+                key={message.id}
+                className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <div className="w-full h-full bg-gray-100 flex items-center justify-center">
-                  {asset.type === 'image' ? '📷' : '🎥'}
+                <div
+                  className={`max-w-xs rounded-lg px-3 py-2 ${
+                    message.type === 'user'
+                      ? 'bg-purple-500 text-white'
+                      : 'bg-gray-100 text-gray-900'
+                  }`}
+                >
+                  {message.assets && message.assets.length > 0 && (
+                    <div className="mb-2 flex space-x-1">
+                      {message.assets.map((asset) => (
+                        <div key={asset.id} className="w-8 h-8 bg-white/20 rounded flex items-center justify-center">
+                          <span className="text-xs">{asset.type === 'image' ? '📷' : '🎥'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-sm whitespace-pre-line">{message.content}</p>
+                  <p className={`text-xs mt-1 ${message.type === 'user' ? 'text-purple-100' : 'text-gray-500'}`}>
+                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </p>
                 </div>
-                {selectedAssets.find(a => a.id === asset.id) && (
-                  <div className="absolute top-1 right-1 h-5 w-5 bg-purple-500 rounded-full flex items-center justify-center">
-                    <span className="text-xs text-white">✓</span>
-                  </div>
-                )}
               </div>
             ))}
-          </div>
-          
-          {selectedAssets.length > 0 && (
-            <div className="mt-2">
-              <p className="text-xs text-purple-600">
-                {selectedAssets.length} asset{selectedAssets.length > 1 ? 's' : ''} selected
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className={`max-w-xs rounded-lg px-3 py-2 ${
-                  message.type === 'user'
-                    ? 'bg-purple-500 text-white'
-                    : 'bg-gray-100 text-gray-900'
-                }`}
-              >
-                {message.assets && message.assets.length > 0 && (
-                  <div className="mb-2 flex space-x-1">
-                    {message.assets.map((asset) => (
-                      <div key={asset.id} className="w-8 h-8 bg-white/20 rounded flex items-center justify-center">
-                        <span className="text-xs">{asset.type === 'image' ? '📷' : '🎥'}</span>
-                      </div>
-                    ))}
+            
+            {isGenerating && (
+              <div className="flex justify-start">
+                <div className="bg-gray-100 rounded-lg px-3 py-2">
+                  <div className="flex items-center space-x-2">
+                    <ArrowPathIcon className="h-4 w-4 text-purple-500 animate-spin" />
+                    <span className="text-sm text-gray-600">Generating content...</span>
                   </div>
-                )}
-                <p className="text-sm whitespace-pre-line">{message.content}</p>
-                <p className={`text-xs mt-1 ${message.type === 'user' ? 'text-purple-100' : 'text-gray-500'}`}>
-                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </p>
-              </div>
-            </div>
-          ))}
-          
-          {isGenerating && (
-            <div className="flex justify-start">
-              <div className="bg-gray-100 rounded-lg px-3 py-2">
-                <div className="flex items-center space-x-2">
-                  <ArrowPathIcon className="h-4 w-4 text-purple-500 animate-spin" />
-                  <span className="text-sm text-gray-600">Generating content...</span>
                 </div>
               </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
 
-        {/* Input */}
-        <div className="p-4 border-t border-gray-200">
-          <div className="flex space-x-2">
-            <input
-              type="text"
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="Describe the content you want to generate..."
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-sm"
-            />
-            <button
-              onClick={handleSendMessage}
-              disabled={!inputMessage.trim() && selectedAssets.length === 0}
-              className="px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
-            >
-              <PaperAirplaneIcon className="h-4 w-4" />
-            </button>
+          {/* Input */}
+          <div className="p-4 border-t border-gray-200">
+            <div className="flex space-x-2">
+              <input
+                type="text"
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                placeholder="Describe the content you want to generate..."
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-sm text-gray-900 placeholder-gray-500"
+              />
+              <button
+                onClick={handleSendMessage}
+                disabled={!inputMessage.trim() && selectedAssets.length === 0}
+                className="px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                <PaperAirplaneIcon className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
