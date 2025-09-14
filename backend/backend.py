@@ -620,49 +620,63 @@ def select_photos_from_directory(
         return [Path(f[0]) for f in files_with_time[:imgs]]
 
 
+import os
+import glob
+import json
+import requests
+from pathlib import Path
+from datetime import datetime
+from flask import request, jsonify
+
 @app.route("/select", methods=["POST"])
 def select_top_photos():
-    """Select top n photos using AI agents"""
+    """Select top n photos using AI agents and recommend accompanying songs"""
     try:
         data = request.get_json() or {}
-
+        
         # Get parameters
         n_photos = data.get("n", 2)
         img_dir = data.get("directory", UPLOAD_FOLDER)
         post_type = data.get("post_type", "Instagram Story for a fun philosophy club.")
         agents = data.get("agents", None)
-
+        include_songs = data.get("include_songs", True)
+        song_count = data.get("song_count", 3)
+        
         if agents is None:
             # Get available agents
             agent_files = glob.glob(os.path.join(AGENTS_FOLDER, "*.md"))
             if not agent_files:
                 return jsonify({"error": f"No agent files found in {AGENTS_FOLDER}"}), 404
-
             agents = [Path(agent) for agent in agent_files]
         else:
             agents = [os.path.join(AGENTS_FOLDER, f"{agent}.md") for agent in agents]
-
+        
         # Validate parameters
         if not isinstance(n_photos, int) or n_photos < 1:
             return jsonify({"error": 'Parameter "n" must be a positive integer'}), 400
-
-        if n_photos > 50:  # Reasonable limit
+        if n_photos > 50:
             return jsonify({"error": "Maximum 50 photos can be selected at once"}), 400
-
+        if not isinstance(song_count, int) or song_count < 1:
+            return jsonify({"error": 'Parameter "song_count" must be a positive integer'}), 400
+        if song_count > 10:
+            return jsonify({"error": "Maximum 10 songs can be recommended at once"}), 400
+        
         # Check if directory exists
         if not os.path.exists(img_dir):
             return jsonify({"error": f"Directory not found: {img_dir}"}), 404
-
+        
         # Check for required API key
         if not os.environ.get("CLAUDE_API_KEY"):
             return (
                 jsonify({"error": "CLAUDE_API_KEY environment variable is required"}),
                 500,
             )
-
-        # Select photos
+        
+        # Select photos and capture selection context
         try:
-            selected_photos = select_photos_from_directory(agents, n_photos, img_dir)
+            selected_photos, selection_context = select_photos_from_directory_with_context(
+                agents, n_photos, img_dir, post_type
+            )
         except ImportError as e:
             return (
                 jsonify(
@@ -678,7 +692,7 @@ def select_top_photos():
             return jsonify({"error": str(e)}), 404
         except Exception as e:
             return jsonify({"error": f"Photo selection failed: {str(e)}"}), 500
-
+        
         if not selected_photos:
             return (
                 jsonify(
@@ -686,8 +700,8 @@ def select_top_photos():
                 ),
                 404,
             )
-
-        # Format response
+        
+        # Format photo response
         result_photos = []
         for photo_path in selected_photos:
             filename = os.path.basename(photo_path)
@@ -695,7 +709,6 @@ def select_top_photos():
             modified_time = datetime.fromtimestamp(
                 os.path.getmtime(photo_path)
             ).isoformat()
-
             result_photos.append(
                 {
                     "filename": filename,
@@ -707,25 +720,329 @@ def select_top_photos():
                     ),
                 }
             )
-
-        return (
-            jsonify(
-                {
-                    "message": f"Selected top {len(result_photos)} photos",
-                    "requested_count": n_photos,
-                    "selected_count": len(result_photos),
-                    "agents_used": len(agents),
-                    "directory": img_dir,
-                    "post_type": post_type,
-                    "selected_photos": result_photos,
-                    "selection_time": datetime.now().isoformat(),
-                }
-            ),
-            200,
-        )
-
+        
+        # Get song recommendations if requested
+        recommended_songs = []
+        if include_songs:
+            try:
+                recommended_songs = get_song_recommendations(
+                    selected_photos, post_type, agents, selection_context, song_count
+                )
+            except Exception as e:
+                print(f"Song recommendation failed: {str(e)}")
+                recommended_songs = []
+        
+        # Build response
+        response_data = {
+            "message": f"Selected top {len(result_photos)} photos",
+            "requested_count": n_photos,
+            "selected_count": len(result_photos),
+            "agents_used": len(agents),
+            "directory": img_dir,
+            "post_type": post_type,
+            "selected_photos": result_photos,
+            "selection_time": datetime.now().isoformat(),
+        }
+        
+        if recommended_songs:
+            response_data["recommended_songs"] = recommended_songs
+            response_data["song_count"] = len(recommended_songs)
+        
+        return jsonify(response_data), 200
+        
     except Exception as e:
         return jsonify({"error": f"Selection failed: {str(e)}"}), 500
+
+
+def select_photos_from_directory_with_context(agents, n_photos, img_dir, post_type):
+    """
+    Modified version of select_photos_from_directory that also returns 
+    the context/reasoning used in selection for song recommendation
+    """
+    # This function should be your existing photo selection logic
+    # but modified to also return the agent reasoning/context
+    
+    # Placeholder - replace with your actual implementation
+    # The key change is returning both selected photos AND the context
+    selected_photos = select_photos_from_directory(agents, n_photos, img_dir)
+    
+    # Capture the selection context - this should include agent descriptions,
+    # selection reasoning, identified themes, etc.
+    selection_context = {
+        "agent_descriptions": load_agent_descriptions(agents),
+        "selection_reasoning": "Photos selected based on agent criteria",
+        "identified_themes": [],
+        "visual_elements": [],
+        "post_type": post_type
+    }
+    
+    return selected_photos, selection_context
+
+
+def load_agent_descriptions(agents):
+    """Load and return descriptions of the agents used for selection"""
+    descriptions = {}
+    for agent_path in agents:
+        try:
+            with open(agent_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                agent_name = Path(agent_path).stem
+                descriptions[agent_name] = content
+        except Exception as e:
+            print(f"Error loading agent {agent_path}: {e}")
+            descriptions[Path(agent_path).stem] = "Unable to load agent description"
+    return descriptions
+
+
+def get_song_recommendations(selected_photos, post_type, agents, selection_context, song_count=3):
+    """Generate song recommendations that cohere the selected photos"""
+    try:
+        # Analyze photos in context of their selection
+        photo_analysis = analyze_photos_for_musical_coherence(
+            selected_photos, selection_context
+        )
+        
+        # Create comprehensive prompt for song recommendation
+        song_prompt = create_coherence_based_song_prompt(
+            photo_analysis, post_type, selection_context, song_count
+        )
+        
+        # Get recommendations from Claude API
+        recommendations = query_claude_for_songs(song_prompt)
+        
+        # Validate and format recommendations
+        formatted_songs = format_song_recommendations(recommendations)
+        
+        return formatted_songs
+        
+    except Exception as e:
+        raise Exception(f"Failed to get song recommendations: {str(e)}")
+
+
+def analyze_photos_for_musical_coherence(selected_photos, selection_context):
+    """
+    Analyze photos with focus on musical coherence based on why they were selected
+    """
+    try:
+        analysis_prompt = f"""
+        Analyze these {len(selected_photos)} selected photos for musical accompaniment.
+        
+        Context of Selection:
+        - Post Type: {selection_context['post_type']}
+        - Agent Criteria: {list(selection_context['agent_descriptions'].keys())}
+        - Selection Reasoning: {selection_context['selection_reasoning']}
+        
+        For musical coherence, identify:
+        1. Unifying visual themes across all photos
+        2. Common emotional tone or mood
+        3. Energy level and pacing implications
+        4. Cultural or temporal context
+        5. Target audience based on post type
+        6. Narrative flow between images
+        7. Aesthetic style (modern, vintage, artistic, etc.)
+        
+        Focus on elements that create coherence and would benefit from 
+        unified musical accompaniment.
+        """
+        
+        # Use your existing photo analysis system with this specific prompt
+        coherence_analysis = perform_agent_analysis(
+            selected_photos, selection_context['agent_descriptions'], analysis_prompt
+        )
+        
+        return coherence_analysis
+        
+    except Exception as e:
+        return f"Basic analysis: {len(selected_photos)} photos selected for {selection_context['post_type']}"
+
+
+def create_coherence_based_song_prompt(photo_analysis, post_type, selection_context, song_count):
+    """Create a detailed prompt for coherent song recommendations"""
+    
+    agent_context = ""
+    for agent_name, description in selection_context['agent_descriptions'].items():
+        # Extract key characteristics from agent descriptions
+        agent_summary = extract_agent_musical_preferences(description)
+        agent_context += f"- {agent_name}: {agent_summary}\n"
+    
+    prompt = f"""
+    Recommend {song_count} songs that will create COHERENCE for this photo collection.
+
+    PHOTO SELECTION CONTEXT:
+    {photo_analysis}
+    
+    POST DETAILS:
+    - Type: {post_type}
+    - Number of photos: {len(selection_context.get('selected_photos', []))}
+    
+    AGENT PERSPECTIVES USED IN SELECTION:
+    {agent_context}
+    
+    COHERENCE REQUIREMENTS:
+    The songs should act as a "musical thread" that ties the photos together by:
+    1. Reinforcing the common themes identified by the selection agents
+    2. Creating emotional continuity across the photo sequence
+    3. Matching the intended audience and platform for "{post_type}"
+    4. Supporting the narrative or aesthetic flow between images
+    
+    For each song recommendation, provide:
+    {{
+        "title": "Song Title",
+        "artist": "Artist Name",
+        "genre": "Musical Genre",
+        "coherence_reason": "Specific explanation of how this song creates coherence between the selected photos",
+        "energy_level": 1-10,
+        "mood_keywords": ["keyword1", "keyword2"],
+        "target_moment": "Which part of the photo sequence this song best accompanies",
+        "platform_appropriate": true/false,
+        "licensing_note": "Brief note about typical social media usage"
+    }}
+    
+    Prioritize songs that:
+    - Are recognizable and emotionally resonant
+    - Have appropriate licensing for social media
+    - Create thematic unity without overwhelming the visual content
+    - Match the sophistication level implied by the agent selection criteria
+    
+    Return as valid JSON array.
+    """
+    
+    return prompt
+
+
+def extract_agent_musical_preferences(agent_description):
+    """Extract musical preferences or style implications from agent description"""
+    # Simple keyword-based extraction - you could make this more sophisticated
+    musical_indicators = {
+        "aesthetic": "values visual harmony",
+        "modern": "contemporary sensibilities", 
+        "classical": "traditional/timeless preferences",
+        "energetic": "high-energy musical choices",
+        "contemplative": "reflective musical taste",
+        "social": "mainstream/popular music",
+        "artistic": "creative/indie musical preferences",
+        "professional": "polished/commercial music",
+        "casual": "relaxed musical atmosphere"
+    }
+    
+    description_lower = agent_description.lower()
+    found_indicators = []
+    
+    for keyword, musical_implication in musical_indicators.items():
+        if keyword in description_lower:
+            found_indicators.append(musical_implication)
+    
+    return "; ".join(found_indicators) if found_indicators else "general musical taste"
+
+
+def perform_agent_analysis(selected_photos, agent_descriptions, analysis_prompt):
+    """Perform analysis using the agent system with specific prompt"""
+    # This should integrate with your existing agent analysis system
+    # Placeholder implementation
+    try:
+        # Use your existing agent analysis pipeline here
+        # This is where you'd call your prompter/templater system
+        return f"Analysis of {len(selected_photos)} photos using {len(agent_descriptions)} agents for musical coherence"
+    except Exception as e:
+        return f"Unable to perform detailed analysis: {str(e)}"
+
+
+def query_claude_for_songs(prompt):
+    """Query Claude API for song recommendations"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {os.environ.get('CLAUDE_API_KEY')}",
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
+        }
+        
+        payload = {
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 3000
+        }
+        
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            songs_text = result["content"][0]["text"]
+            
+            # Extract JSON from the response
+            try:
+                # Look for JSON array in the response
+                start_idx = songs_text.find('[')
+                end_idx = songs_text.rfind(']') + 1
+                if start_idx != -1 and end_idx != 0:
+                    json_str = songs_text[start_idx:end_idx]
+                    songs = json.loads(json_str)
+                    return songs
+                else:
+                    # Fallback: try to parse entire response as JSON
+                    return json.loads(songs_text)
+            except json.JSONDecodeError:
+                # Fallback: create structured response from text
+                return parse_song_text_response(songs_text)
+                
+        else:
+            raise Exception(f"Claude API error: {response.status_code} - {response.text}")
+            
+    except Exception as e:
+        raise Exception(f"Claude query failed: {str(e)}")
+
+
+def parse_song_text_response(songs_text):
+    """Fallback parser for non-JSON song responses"""
+    # Simple parser for when Claude doesn't return valid JSON
+    songs = []
+    lines = songs_text.split('\n')
+    
+    current_song = {}
+    for line in lines:
+        line = line.strip()
+        if 'title:' in line.lower() or 'song:' in line.lower():
+            if current_song:
+                songs.append(current_song)
+            current_song = {"title": line.split(':', 1)[1].strip()}
+        elif 'artist:' in line.lower():
+            current_song["artist"] = line.split(':', 1)[1].strip()
+        elif 'genre:' in line.lower():
+            current_song["genre"] = line.split(':', 1)[1].strip()
+        elif 'reason:' in line.lower() or 'coherence:' in line.lower():
+            current_song["coherence_reason"] = line.split(':', 1)[1].strip()
+    
+    if current_song:
+        songs.append(current_song)
+    
+    return songs
+
+
+def format_song_recommendations(recommendations):
+    """Format and validate song recommendations"""
+    formatted = []
+    
+    for song in recommendations:
+        # Ensure required fields exist
+        formatted_song = {
+            "title": song.get("title", "Unknown Title"),
+            "artist": song.get("artist", "Unknown Artist"), 
+            "genre": song.get("genre", "Unknown Genre"),
+            "coherence_reason": song.get("coherence_reason", "Complements photo selection"),
+            "energy_level": song.get("energy_level", 5),
+            "mood_keywords": song.get("mood_keywords", []),
+            "target_moment": song.get("target_moment", "Overall accompaniment"),
+            "platform_appropriate": song.get("platform_appropriate", True),
+            "licensing_note": song.get("licensing_note", "Check platform licensing requirements")
+        }
+        
+        formatted.append(formatted_song)
+    
+    return formatted
 
 
 @app.route("/agents", methods=["GET"])
