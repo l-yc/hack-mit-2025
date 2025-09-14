@@ -113,7 +113,7 @@ def _default_env() -> Environment:
     )
 
 
-def partial_render(template_str: str, context: Mapping[str, Any] | None = None) -> str:
+def partial_render(template_str: str, context: Optional[Mapping[str, Any]] = None) -> str:
     """
     Partially render a Jinja template string.
 
