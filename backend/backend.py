@@ -724,31 +724,21 @@ def select_top_photos():
 
         # Ensure the context knows which photos (by filename) were selected
         selection_context["selected_photos"] = [os.path.basename(p) for p in selected_photos]
-        
-        # Generate captions if requested
-        photo_captions = {}
-        if include_captions:
-            try:
-                photo_captions = generate_photo_captions(
-                    selected_photos, post_type, selection_context
-                )
-            except Exception as e:
-                # Non-fatal: keep going without captions
-                print(f"Caption generation failed: {str(e)}")
-                photo_captions = {}
 
-        # Get song recommendations if requested
-        recommended_songs = []
-        if include_songs:
-            try:
-                recommended_songs = get_song_recommendations(
-                    selected_photos, post_type, agents, selection_context, song_count
-                )
-            except Exception as e:
-                print(f"Song recommendation failed: {str(e)}")
-                recommended_songs = []
-        
-        # Build response
+        # --- NEW: Generate ONE caption for the entire post
+        post_caption = generate_post_caption(selected_photos, post_type, selection_context)
+
+        # --- NEW: Get ONE song recommendation for the entire post
+        song_recommendation = {}
+        try:
+            song_recommendation = get_single_song_recommendation(
+                selected_photos, post_type, selection_context
+            )
+        except Exception as e:
+            # Non-fatal: still return the rest
+            song_recommendation = {"title": "", "artist": "", "error": str(e)}
+
+        # Build response (single caption + single song)
         response_data = {
             "message": f"Selected top {len(result_photos)} photos",
             "requested_count": n_photos,
@@ -757,13 +747,10 @@ def select_top_photos():
             "directory": img_dir,
             "post_type": post_type,
             "selected_photos": result_photos,
-            "photo_captions": str(photo_captions),
+            "post_caption": post_caption,                 # <-- single caption
+            "song_recommendation": song_recommendation,   # <-- single song
             "selection_time": datetime.now().isoformat(),
         }
-        
-        if recommended_songs:
-            response_data["recommended_songs"] = recommended_songs
-            response_data["song_count"] = len(recommended_songs)
         
         return jsonify(response_data), 200
         
@@ -1290,3 +1277,136 @@ def list_agents():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=6741)
+
+
+# --- Single-post caption + song helpers ---------------------------------------
+def generate_post_caption(selected_photos, post_type, selection_context):
+    """
+    Generate ONE caption that ties the whole post together.
+    Returns a dict: {"text": "...", "style": "...", "theme": "..."}
+    """
+    if not selected_photos:
+        return {"text": f"{post_type}", "style": "default", "theme": "general"}
+
+    prompt = _create_post_caption_prompt(selected_photos, post_type, selection_context)
+    try:
+        result = _anthropic_request_with_fallbacks(
+            content=prompt,
+            max_tokens=600,
+            candidates=_model_candidates("captions"),
+        )
+        text = result["content"][0]["text"]
+
+        # Expect a single JSON object; fallback to best-effort parse
+        try:
+            # Find a JSON object in text
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            obj = json.loads(text[start:end]) if start != -1 and end > start else json.loads(text)
+            # normalize keys
+            return {
+                "text": obj.get("caption") or obj.get("text") or obj.get("body") or "",
+                "style": obj.get("style") or obj.get("tone") or "",
+                "theme": obj.get("theme") or obj.get("connection_to_theme") or "",
+            }
+        except Exception:
+            # last-ditch: trim to 1–2 sentences
+            first_two = text.strip().split("\n")[0]
+            return {"text": first_two[:300].strip(), "style": "default", "theme": "general"}
+    except Exception as e:
+        # Non-fatal fallback
+        return {"text": f"{post_type}", "style": "default", "theme": "general", "error": str(e)}
+
+
+def _create_post_caption_prompt(photo_paths, post_type, selection_context):
+    agent_summaries = []
+    for name, desc in selection_context.get("agent_descriptions", {}).items():
+        agent_summaries.append(f"- {name}: {extract_agent_caption_style(desc)}")
+    photo_list = ", ".join(os.path.basename(p) for p in photo_paths)
+
+    return f"""
+You are helping write ONE unified social caption that ties a post together.
+
+CONTEXT
+- Post type: {post_type}
+- Selected photos (filenames): {photo_list}
+- Agent perspectives:
+{chr(10).join(agent_summaries) if agent_summaries else "- (none)"}
+- Selection reasoning: {selection_context.get("selection_reasoning","")}
+
+REQUIREMENTS
+- 1–2 sentences total. Cohesive, platform-appropriate, no hashtags, no emojis.
+- Unify common themes/mood across the images.
+- Keep it human, natural, and non-cringe.
+
+Return a JSON object with fields exactly:
+{{
+  "caption": "…one or two sentences…",
+  "style": "short descriptor of tone",
+  "theme": "short phrase of the unifying theme"
+}}
+"""
+
+
+def get_single_song_recommendation(selected_photos, post_type, selection_context):
+    """
+    Recommend ONE song that best fits the entire post.
+    Returns a dict with keys like: title, artist, genre, coherence_reason, etc.
+    """
+    prompt = _create_single_song_prompt(selected_photos, post_type, selection_context)
+    try:
+        result = _anthropic_request_with_fallbacks(
+            content=prompt,
+            max_tokens=700,
+            candidates=_model_candidates("songs"),
+        )
+        text = result["content"][0]["text"]
+
+        # Expect a single JSON object; fallback to parse
+        try:
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            obj = json.loads(text[start:end]) if start != -1 and end > start else json.loads(text)
+            # minimal normalization
+            return {
+                "title": obj.get("title") or "",
+                "artist": obj.get("artist") or "",
+                "genre": obj.get("genre") or "",
+                "coherence_reason": obj.get("coherence_reason") or obj.get("reason") or "",
+                "energy_level": obj.get("energy_level") or obj.get("energy") or "",
+                "mood_keywords": obj.get("mood_keywords") or obj.get("mood") or [],
+                "platform_appropriate": obj.get("platform_appropriate", True),
+                "licensing_note": obj.get("licensing_note") or "",
+            }
+        except Exception:
+            # very simple heuristic fallback
+            lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+            guess = {"title": "", "artist": "", "genre": "", "coherence_reason": lines[0] if lines else ""}
+            return guess
+    except Exception as e:
+        return {"title": "", "artist": "", "genre": "", "coherence_reason": "", "error": str(e)}
+
+
+def _create_single_song_prompt(selected_photos, post_type, selection_context):
+    photo_list = ", ".join(os.path.basename(p) for p in selected_photos)
+    return f"""
+Recommend one song (single track) that creates the best overall coherence for this post.
+
+CONTEXT
+- Post type: {post_type}
+- Selected photos: {photo_list}
+- Selection reasoning: {selection_context.get("selection_reasoning","")}
+
+RETURN a single JSON object:
+{{
+  "title": "Song Title",
+  "artist": "Artist Name",
+  "genre": "Genre",
+  "coherence_reason": "Why this track unifies the images",
+  "energy_level": 1-10,
+  "mood_keywords": ["keyword1","keyword2"],
+  "platform_appropriate": true,
+  "licensing_note": "short, general note"
+}}
+Only the JSON object, no extra text.
+"""
