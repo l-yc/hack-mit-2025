@@ -1,4 +1,4 @@
-# Deployment Guide for ContentGenAI
+# Deployment Guide for Hyperfeed
 
 This guide covers deploying your social media content generator to Vercel with Prisma and PostgreSQL.
 
@@ -204,4 +204,4 @@ next dev
 - **Vercel Functions**: Consider Pro plan for higher limits
 - **CDN**: Optimize asset delivery
 
-Your ContentGenAI app is now deployed and ready for production use!
+Your Hyperfeed app is now deployed and ready for production use!

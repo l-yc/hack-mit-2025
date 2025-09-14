@@ -7,7 +7,7 @@ import { AppProvider } from '@/lib/context'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
-  title: 'ContentGenAI',
+  title: 'Hyperfeed',
   description: 'AI-powered social media content generator',
 }
 

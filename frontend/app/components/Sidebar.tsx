@@ -25,7 +25,7 @@ export default function Sidebar() {
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200">
         {!collapsed && (
-          <h1 className="text-xl font-bold text-purple-600">ContentGenAI</h1>
+          <h1 className="text-xl font-bold text-purple-600">Hyperfeed</h1>
         )}
         <button
           onClick={() => setCollapsed(!collapsed)}
