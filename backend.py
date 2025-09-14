@@ -41,10 +41,10 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Initialize database
-@app.before_first_request
 def create_tables():
-    db.create_all()
+    """Create database tables if they don't exist"""
+    with app.app_context():
+        db.create_all()
 
 # Routes
 
@@ -69,9 +69,18 @@ def upload_image():
         # Secure the filename
         filename = secure_filename(file.filename)
         
+        # Check for empty filename after securing
+        if not filename:
+            return jsonify({'error': 'Invalid filename'}), 400
+        
         # Read file content
         file_content = file.read()
         file_size = len(file_content)
+        
+        # Check if file is empty
+        if file_size == 0:
+            return jsonify({'error': 'File is empty'}), 400
+        
         content_type = file.content_type or 'application/octet-stream'
         
         # Check if image with same filename already exists
@@ -116,9 +125,7 @@ def list_images():
 def get_image(image_id):
     """Retrieve a specific image by ID"""
     try:
-        image = ImageStorage.query.get(image_id)
-        if not image:
-            return jsonify({'error': 'Image not found'}), 404
+        image = ImageStorage.query.get_or_404(image_id)
         
         # Return image file
         return send_file(
@@ -152,10 +159,7 @@ def get_image_by_filename(filename):
 def get_image_info(image_id):
     """Get image metadata without downloading the file"""
     try:
-        image = ImageStorage.query.get(image_id)
-        if not image:
-            return jsonify({'error': 'Image not found'}), 404
-        
+        image = ImageStorage.query.get_or_404(image_id)
         return jsonify({'image': image.to_dict()}), 200
     except Exception as e:
         return jsonify({'error': f'Failed to retrieve image info: {str(e)}'}), 500
@@ -164,14 +168,13 @@ def get_image_info(image_id):
 def delete_image(image_id):
     """Delete a specific image"""
     try:
-        image = ImageStorage.query.get(image_id)
-        if not image:
-            return jsonify({'error': 'Image not found'}), 404
+        image = ImageStorage.query.get_or_404(image_id)
         
+        filename = image.filename  # Store filename before deletion
         db.session.delete(image)
         db.session.commit()
         
-        return jsonify({'message': f'Image "{image.filename}" deleted successfully'}), 200
+        return jsonify({'message': f'Image "{filename}" deleted successfully'}), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': f'Failed to delete image: {str(e)}'}), 500
@@ -180,9 +183,7 @@ def delete_image(image_id):
 def get_image_base64(image_id):
     """Get image as base64 encoded string"""
     try:
-        image = ImageStorage.query.get(image_id)
-        if not image:
-            return jsonify({'error': 'Image not found'}), 404
+        image = ImageStorage.query.get_or_404(image_id)
         
         # Encode image content to base64
         encoded_content = base64.b64encode(image.content).decode('utf-8')
@@ -216,8 +217,7 @@ def internal_error(e):
 
 if __name__ == '__main__':
     # Create database tables
-    with app.app_context():
-        db.create_all()
+    create_tables()
     
     # Run the application
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=6741)
