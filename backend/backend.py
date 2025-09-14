@@ -3,6 +3,7 @@ import os
 import re
 import uuid
 import yaml
+import json
 import requests
 import traceback
 
@@ -37,7 +38,7 @@ CORS(app, origins=[
 # Configuration
 UPLOAD_FOLDER = "uploads"
 MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
-ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "bmp", "webp"}
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "bmp", "webp", "heic", "tiff"}
 ALLOWED_MIME_TYPES = {
     "image/png",
     "image/jpeg",
@@ -45,6 +46,10 @@ ALLOWED_MIME_TYPES = {
     "image/gif",
     "image/bmp",
     "image/webp",
+    # Some setups provide these for HEIC/HEIF if Pillow plugins are installed
+    "image/heic",
+    "image/heif",
+    "image/tiff",
 }
 AGENTS_FOLDER = Path(__file__).parent / "prompts" / "agents"
 PROMPTS_FOLDER = Path(__file__).parent / "prompts"
@@ -625,7 +630,7 @@ def select_photos_from_directory(
 
 @app.route("/select", methods=["POST"])
 def select_top_photos():
-    """Select top n photos using AI agents and recommend accompanying songs"""
+    """Select top n photos using AI agents, generate captions, and recommend songs"""
     try:
         data = request.get_json() or {}
         
@@ -636,6 +641,7 @@ def select_top_photos():
         agents = data.get("agents", None)
         include_songs = data.get("include_songs", True)
         song_count = data.get("song_count", 3)
+        include_captions = data.get("include_captions", True)
         
         if agents is None:
             # Get available agents
@@ -660,7 +666,7 @@ def select_top_photos():
         if not os.path.exists(img_dir):
             return jsonify({"error": f"Directory not found: {img_dir}"}), 404
         
-        # Check for required API key
+        # Check for required API key (needed for agents, songs, and captions)
         if not os.environ.get("CLAUDE_API_KEY"):
             return (
                 jsonify({"error": "CLAUDE_API_KEY environment variable is required"}),
@@ -715,7 +721,22 @@ def select_top_photos():
                     ),
                 }
             )
+
+        # Ensure the context knows which photos (by filename) were selected
+        selection_context["selected_photos"] = [os.path.basename(p) for p in selected_photos]
         
+        # Generate captions if requested
+        photo_captions = {}
+        if include_captions:
+            try:
+                photo_captions = generate_photo_captions(
+                    selected_photos, post_type, selection_context
+                )
+            except Exception as e:
+                # Non-fatal: keep going without captions
+                print(f"Caption generation failed: {str(e)}")
+                photo_captions = {}
+
         # Get song recommendations if requested
         recommended_songs = []
         if include_songs:
@@ -736,6 +757,7 @@ def select_top_photos():
             "directory": img_dir,
             "post_type": post_type,
             "selected_photos": result_photos,
+            "photo_captions": photo_captions,
             "selection_time": datetime.now().isoformat(),
         }
         
@@ -752,23 +774,17 @@ def select_top_photos():
 def select_photos_from_directory_with_context(agents, n_photos, img_dir, post_type):
     """
     Modified version of select_photos_from_directory that also returns 
-    the context/reasoning used in selection for song recommendation
+    the context/reasoning used in selection for song recommendation & captioning
     """
-    # This function should be your existing photo selection logic
-    # but modified to also return the agent reasoning/context
-    
-    # Placeholder - replace with your actual implementation
-    # The key change is returning both selected photos AND the context
     selected_photos = select_photos_from_directory(agents, n_photos, img_dir)
     
-    # Capture the selection context - this should include agent descriptions,
-    # selection reasoning, identified themes, etc.
     selection_context = {
         "agent_descriptions": load_agent_descriptions(agents),
         "selection_reasoning": "Photos selected based on agent criteria",
         "identified_themes": [],
         "visual_elements": [],
-        "post_type": post_type
+        "post_type": post_type,
+        # the caller will also inject "selected_photos" by filename
     }
     
     return selected_photos, selection_context
@@ -932,11 +948,8 @@ def extract_agent_musical_preferences(agent_description):
 
 def perform_agent_analysis(selected_photos, agent_descriptions, analysis_prompt):
     """Perform analysis using the agent system with specific prompt"""
-    # This should integrate with your existing agent analysis system
-    # Placeholder implementation
+    # Placeholder implementation; integrate your agent pipeline here
     try:
-        # Use your existing agent analysis pipeline here
-        # This is where you'd call your prompter/templater system
         return f"Analysis of {len(selected_photos)} photos using {len(agent_descriptions)} agents for musical coherence"
     except Exception as e:
         return f"Unable to perform detailed analysis: {str(e)}"
@@ -970,7 +983,6 @@ def query_claude_for_songs(prompt):
             
             # Extract JSON from the response
             try:
-                # Look for JSON array in the response
                 start_idx = songs_text.find('[')
                 end_idx = songs_text.rfind(']') + 1
                 if start_idx != -1 and end_idx != 0:
@@ -993,7 +1005,6 @@ def query_claude_for_songs(prompt):
 
 def parse_song_text_response(songs_text):
     """Fallback parser for non-JSON song responses"""
-    # Simple parser for when Claude doesn't return valid JSON
     songs = []
     lines = songs_text.split('\n')
     
@@ -1027,7 +1038,9 @@ def generate_photo_captions(photo_paths, post_type, selection_context):
         captions_response = query_claude_for_captions(caption_prompt)
         
         # Format and validate captions
-        formatted_captions = format_photo_captions(captions_response, photo_paths)
+        formatted_captions = format_photo_captions(
+            captions_response, photo_paths, selection_context.get("post_type", "sharing")
+        )
         
         return formatted_captions
         
@@ -1185,7 +1198,7 @@ def parse_caption_text_response(captions_text):
     return captions
 
 
-def format_photo_captions(captions_response, photo_paths):
+def format_photo_captions(captions_response, photo_paths, post_type_fallback="sharing"):
     """Format and validate photo captions"""
     formatted_captions = {}
     
@@ -1218,7 +1231,7 @@ def format_photo_captions(captions_response, photo_paths):
     for filename in filenames:
         if filename not in formatted_captions:
             formatted_captions[filename] = {
-                "text": f"Selected for {formatted_captions.get('post_type', 'sharing')}",
+                "text": f"Selected for {post_type_fallback}",
                 "style": "default",
                 "theme_connection": "part of curated collection",
                 "sequence_role": "supporting image"
