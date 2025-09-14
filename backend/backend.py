@@ -74,7 +74,7 @@ CORS(
 # Configuration
 UPLOAD_FOLDER = "uploads"
 # Allow overriding via env; default larger for videos (100MB)
-MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE_BYTES", 100 * 1024 * 1024))
+MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE_BYTES", 200 * 1024 * 1024))
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "bmp", "webp", "heic", "tiff"}
 ALLOWED_MIME_TYPES = {
     "image/png",
