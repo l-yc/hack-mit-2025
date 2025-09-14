@@ -1,6 +1,7 @@
 import glob
 import os
 import re
+from typing import Optional
 import uuid
 import yaml
 import json
@@ -122,7 +123,7 @@ def _build_song_search_urls(title: str, artist: str) -> dict:
         "soundcloud_search": f"https://soundcloud.com/search?q={q_enc}",
     }
 
-def resolve_song_links(title: str, artist: str, country: str | None = None) -> dict:
+def resolve_song_links(title: str, artist: str, country: Optional[str] = None) -> dict:
     """
     Best-effort: use iTunes Search API (no auth) to fetch a concrete track link,
     plus platform search fallbacks. Returns:
