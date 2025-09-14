@@ -18,8 +18,6 @@ from werkzeug.utils import secure_filename
 
 from PIL import Image
 
-from backend.image_editor import cleanup_image
-
 try:
     # Load .env if present
     from dotenv import load_dotenv
@@ -208,7 +206,7 @@ def _cleanup_selected_photos_with_gemini(
 
     try:
         # Import here to avoid raising at module import if deps not installed
-        from backend.image_editor import cleanup_image, DEFAULT_GEMINI_MODEL  # type: ignore
+        from image_editor import cleanup_image, DEFAULT_GEMINI_MODEL  # type: ignore
     except Exception as e:
         # Cleanup unavailable; return originals
         meta["failures"].append(f"cleanup unavailable: {e}")
