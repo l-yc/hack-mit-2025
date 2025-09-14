@@ -746,6 +746,16 @@ def get_photo(filename):
         return jsonify({"error": "Photo not found"}), 404
 
 
+@app.route("/videos/<path:filename>", methods=["GET"])
+def get_video(filename):
+    """Serve uploaded videos (mp4/mov/m4v)"""
+    try:
+        # Reuse uploads folder; Flask will set proper mimetype by extension
+        return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+    except FileNotFoundError:
+        return jsonify({"error": "Video not found"}), 404
+
+
 @app.route("/videos/upload", methods=["POST"])
 def upload_video():
     """Upload mp4/mov video into uploads/ and return its path for reels input."""

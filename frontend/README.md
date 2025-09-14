@@ -6,7 +6,7 @@ A full-stack web application for uploading, managing, and generating social medi
 
 ### Assets Management
 - **File Upload**: Upload images and videos with backend storage
-- **Advanced Search**: Search by location, people, subjects, colors, mood, and tags
+- **Advanced Search**: Search by tags
 - **Tag Management**: Add and remove tags from assets
 - **Metadata Display**: View asset metadata on hover
 - **Database Storage**: PostgreSQL backend for persistent asset storage
