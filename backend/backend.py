@@ -35,13 +35,7 @@ allowed = [
 preview_regex = re.compile(r"^https://.*\.vercel\.app$")
 CORS(
     app,
-    resources={r"/*": {
-        "origins": allowed + [preview_regex],
-        "methods": ["GET", "POST", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        # set to True only if you actually use cookies/auth:
-        "supports_credentials": False
-    }}
+    origins=allowed
 )
 
 
