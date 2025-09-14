@@ -620,14 +620,6 @@ def select_photos_from_directory(
         return [Path(f[0]) for f in files_with_time[:imgs]]
 
 
-import os
-import glob
-import json
-import requests
-from pathlib import Path
-from datetime import datetime
-from flask import request, jsonify
-
 @app.route("/select", methods=["POST"])
 def select_top_photos():
     """Select top n photos using AI agents and recommend accompanying songs"""
