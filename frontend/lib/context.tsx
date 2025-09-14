@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { Asset } from '@/types/asset';
+import { Asset } from '@/lib/asset-service';
 
 interface Message {
   id: string;

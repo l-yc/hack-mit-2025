@@ -3,13 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { PaperAirplaneIcon, ArrowDownTrayIcon, ShareIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import { useAppContext } from '@/lib/context';
-
-type Asset = {
-  id: string;
-  name: string;
-  url: string;
-  type: 'image' | 'video';
-};
+import { Asset } from '@/lib/asset-service';
 
 type Message = {
   id: string;

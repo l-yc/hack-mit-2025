@@ -9,11 +9,28 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
 from PIL import Image
 
+try:
+    # Load .env if present
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 app = Flask(__name__)
+# Configure CORS
+CORS(app, origins=[
+    "http://localhost:3000",  # React development server
+    "http://localhost:8080",  # Alternative dev server
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:8080",
+    # Add your production frontend URLs here
+    "http://3.146.82.97:6741"
+])
 
 # Configuration
 UPLOAD_FOLDER = "uploads"
@@ -35,6 +52,8 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 
 # Create upload directory if it doesn't exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(os.path.join(UPLOAD_FOLDER, "cleaned"), exist_ok=True)
+os.makedirs(os.path.join(UPLOAD_FOLDER, "edited"), exist_ok=True)
 
 
 def allowed_file(filename):
@@ -216,7 +235,7 @@ def upload_multiple_photos():
         return jsonify({"error": f"Multiple upload failed: {str(e)}"}), 500
 
 
-@app.route("/photos/<filename>", methods=["GET"])
+@app.route("/photos/<path:filename>", methods=["GET"])
 def get_photo(filename):
     """Serve uploaded photos"""
     try:
@@ -261,7 +280,7 @@ def list_photos():
         return jsonify({"error": f"Failed to list photos: {str(e)}"}), 500
 
 
-@app.route("/photos/<filename>", methods=["DELETE"])
+@app.route("/photos/<path:filename>", methods=["DELETE"])
 def delete_photo(filename):
     """Delete a specific photo"""
     try:
@@ -300,6 +319,189 @@ def not_found(e):
 def internal_error(e):
     return jsonify({"error": "Internal server error"}), 500
 
+
+@app.route("/images/cleanup", methods=["POST"])
+def images_cleanup():
+    """Run initial cleanup sweep on an uploaded image.
+
+    Accepts either a multipart form with file field 'photo' or JSON with {'filename': '...'}
+    pointing to an image already present in uploads/.
+    """
+    try:
+        from image_editor import cleanup_image
+    except Exception as e:
+        return jsonify({"error": f"Imagen integration unavailable: {str(e)}"}), 500
+
+    try:
+        input_path = None
+
+        if "photo" in request.files:
+            file = request.files["photo"]
+            if file.filename == "":
+                return jsonify({"error": "No file selected"}), 400
+            if not allowed_file(file.filename):
+                return jsonify({"error": "Invalid file type", "allowed_types": list(ALLOWED_EXTENSIONS)}), 400
+            if file.mimetype not in ALLOWED_MIME_TYPES:
+                return jsonify({"error": "Invalid MIME type", "received": file.mimetype, "allowed_types": list(ALLOWED_MIME_TYPES)}), 400
+            original_filename = secure_filename(file.filename)
+            unique_filename = generate_unique_filename(original_filename)
+            input_path = os.path.join(app.config["UPLOAD_FOLDER"], unique_filename)
+            file.save(input_path)
+            if not validate_image(input_path):
+                os.remove(input_path)
+                return jsonify({"error": "Invalid image file"}), 400
+        else:
+            data = request.get_json() or {}
+            filename = data.get("filename")
+            if not filename:
+                return jsonify({"error": "Provide multipart 'photo' or JSON {'filename': ...}"}), 400
+            input_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+            if not os.path.exists(input_path):
+                return jsonify({"error": f"File not found: {filename}"}), 404
+            if not validate_image(input_path):
+                return jsonify({"error": "Invalid image file"}), 400
+
+        data = request.form if request.form else (request.get_json() or {})
+        prompt = data.get("prompt")
+        negative_prompt = data.get("negative_prompt")
+        seed = data.get("seed")
+        model = data.get("model")
+        provider = data.get("provider")
+        if isinstance(seed, str) and seed.isdigit():
+            seed = int(seed)
+
+        result = cleanup_image(
+            input_path=input_path,
+            output_dir=os.path.join(app.config["UPLOAD_FOLDER"], "cleaned"),
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            seed=seed,
+            model_name=model,
+            provider=provider,
+        )
+
+        rel_output = os.path.relpath(result.output_path, start=app.config["UPLOAD_FOLDER"]).replace("\\", "/")
+        return (
+            jsonify(
+                {
+                    "message": "Cleanup completed",
+                    "input_filename": os.path.basename(result.input_path),
+                    "output_filename": os.path.basename(result.output_path),
+                    "output_url": f"/photos/{rel_output}",
+                    "model": result.model_name,
+                    "seed": result.seed,
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+        return jsonify({"error": f"Cleanup failed: {str(e)}"}), 500
+
+
+@app.route("/images/edit", methods=["POST"])
+def images_edit():
+    """Prompt-based editing sweep with optional mask.
+
+    Accepts multipart with fields:
+      - 'photo': image to edit (optional if 'filename' JSON provided)
+      - 'mask': mask image (white = editable) (optional)
+      - 'prompt': required text instruction
+    Or JSON: {'filename': '...', 'prompt': '...', 'mask_filename': 'optional'}
+    """
+    try:
+        from image_editor import edit_image_with_prompt
+    except Exception as e:
+        return jsonify({"error": f"Imagen integration unavailable: {str(e)}"}), 500
+
+    try:
+        input_path = None
+        mask_path = None
+        prompt = None
+
+        if request.files:
+            if "photo" in request.files and request.files["photo"].filename:
+                photo = request.files["photo"]
+                if not allowed_file(photo.filename):
+                    return jsonify({"error": "Invalid file type", "allowed_types": list(ALLOWED_EXTENSIONS)}), 400
+                if photo.mimetype not in ALLOWED_MIME_TYPES:
+                    return jsonify({"error": "Invalid MIME type", "received": photo.mimetype, "allowed_types": list(ALLOWED_MIME_TYPES)}), 400
+                original_filename = secure_filename(photo.filename)
+                unique_filename = generate_unique_filename(original_filename)
+                input_path = os.path.join(app.config["UPLOAD_FOLDER"], unique_filename)
+                photo.save(input_path)
+                if not validate_image(input_path):
+                    os.remove(input_path)
+                    return jsonify({"error": "Invalid image file"}), 400
+            if "mask" in request.files and request.files["mask"].filename:
+                mask = request.files["mask"]
+                if not allowed_file(mask.filename):
+                    return jsonify({"error": "Invalid mask file type", "allowed_types": list(ALLOWED_EXTENSIONS)}), 400
+                original_mask_name = secure_filename(mask.filename)
+                stored_mask = f"mask_{uuid.uuid4().hex[:8]}_{original_mask_name}"
+                mask_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_mask)
+                mask.save(mask_path)
+                if not validate_image(mask_path):
+                    os.remove(mask_path)
+                    return jsonify({"error": "Invalid mask image file"}), 400
+            form = request.form
+            prompt = form.get("prompt")
+            negative_prompt = form.get("negative_prompt")
+            seed = form.get("seed")
+            model = form.get("model")
+            provider = form.get("provider")
+            seed = int(seed) if seed and str(seed).isdigit() else None
+        else:
+            data = request.get_json() or {}
+            filename = data.get("filename")
+            prompt = data.get("prompt")
+            mask_filename = data.get("mask_filename")
+            negative_prompt = data.get("negative_prompt")
+            seed = data.get("seed")
+            model = data.get("model")
+            provider = data.get("provider")
+            seed = int(seed) if isinstance(seed, int) or (isinstance(seed, str) and seed.isdigit()) else None
+            if filename:
+                input_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+                if not os.path.exists(input_path):
+                    return jsonify({"error": f"File not found: {filename}"}), 404
+            if mask_filename:
+                mask_path = os.path.join(app.config["UPLOAD_FOLDER"], mask_filename)
+                if not os.path.exists(mask_path):
+                    return jsonify({"error": f"Mask not found: {mask_filename}"}), 404
+
+        if not input_path:
+            return jsonify({"error": "No input image provided"}), 400
+        if not prompt or not prompt.strip():
+            return jsonify({"error": "Prompt is required"}), 400
+
+        result = edit_image_with_prompt(
+            input_path=input_path,
+            prompt=prompt,
+            mask_path=mask_path,
+            output_dir=os.path.join(app.config["UPLOAD_FOLDER"], "edited"),
+            negative_prompt=negative_prompt,
+            seed=seed,
+            model_name=model,
+            provider=provider,
+        )
+
+        rel_output = os.path.relpath(result.output_path, start=app.config["UPLOAD_FOLDER"]).replace("\\", "/")
+        return (
+            jsonify(
+                {
+                    "message": "Edit completed",
+                    "input_filename": os.path.basename(result.input_path),
+                    "output_filename": os.path.basename(result.output_path),
+                    "output_url": f"/photos/{rel_output}",
+                    "model": result.model_name,
+                    "seed": result.seed,
+                }
+            ),
+            200,
+        )
+    except Exception as e:
+        return jsonify({"error": f"Edit failed: {str(e)}"}), 500
 
 def poll(agents: list[Path], files: list[str]) -> dict:
     """Poll agents to rate photos"""
