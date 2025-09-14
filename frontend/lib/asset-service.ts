@@ -46,7 +46,7 @@ export abstract class AssetService {
 export class FlaskAssetService extends AssetService {
   private baseUrl: string;
 
-  constructor(baseUrl: string = process.env.NEXT_PUBLIC_FLASK_BACKEND_URL) {
+  constructor(baseUrl: string = process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741') {
     super();
     this.baseUrl = baseUrl;
   }
@@ -243,81 +243,10 @@ export class FlaskAssetService extends AssetService {
   }
 }
 
-// Supabase/Prisma implementation (for backward compatibility)
-export class PrismaAssetService extends AssetService {
-  async uploadAssets(files: File[]): Promise<AssetUploadResult> {
-    const formData = new FormData();
-    files.forEach(file => formData.append('files', file));
-
-    const response = await fetch('/api/assets', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Upload failed');
-    }
-
-    const result = await response.json();
-    return { assets: result.assets };
-  }
-
-  async getAssets(options?: AssetSearchOptions): Promise<Asset[]> {
-    const params = new URLSearchParams();
-    if (options?.query) params.set('q', options.query);
-    if (options?.tags) params.set('tags', options.tags.join(','));
-
-    const response = await fetch(`/api/assets?${params}`);
-    
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to fetch assets');
-    }
-
-    const result = await response.json();
-    return result.assets;
-  }
-
-  async updateAssetTags(id: string, tags: string[]): Promise<Asset> {
-    const response = await fetch(`/api/assets/${id}/tags`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tags }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to update tags');
-    }
-
-    const result = await response.json();
-    return result.asset;
-  }
-
-  async deleteAsset(id: string): Promise<void> {
-    const response = await fetch(`/api/assets/${id}`, {
-      method: 'DELETE',
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to delete asset');
-    }
-  }
-}
-
-// Service factory
-export function createAssetService(type: 'flask' | 'prisma' = 'flask'): AssetService {
-  switch (type) {
-    case 'flask':
-      return new FlaskAssetService();
-    case 'prisma':
-      return new PrismaAssetService();
-    default:
-      throw new Error(`Unknown asset service type: ${type}`);
-  }
+// Service factory - only Flask backend supported now
+export function createAssetService(): AssetService {
+  return new FlaskAssetService();
 }
 
 // Default service instance
-export const assetService = createAssetService('flask');
+export const assetService = createAssetService();
