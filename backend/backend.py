@@ -36,6 +36,24 @@ except Exception:
     except Exception as _e:
         print(f"Reels engine unavailable: {_e}")
 
+# Instagram Graph API helper (optional import)
+publish_video_or_reel = None  # type: ignore
+publish_single = None  # type: ignore
+publish_carousel_items = None  # type: ignore
+try:
+    from .instagram_api import publish_video_or_reel as _pv, publish_single as _ps, publish_carousel_items as _pc  # type: ignore
+    publish_video_or_reel = _pv
+    publish_single = _ps
+    publish_carousel_items = _pc
+except Exception:
+    try:
+        from instagram_api import publish_video_or_reel as _pv2, publish_single as _ps2, publish_carousel_items as _pc2  # type: ignore
+        publish_video_or_reel = _pv2
+        publish_single = _ps2
+        publish_carousel_items = _pc2
+    except Exception as _e:
+        print(f"Instagram API helper unavailable: {_e}")
+
 try:
     # Load .env if present
     from dotenv import load_dotenv
@@ -1176,6 +1194,109 @@ def get_reels_job(job_id: str):
         },
     }
     return jsonify(resp), 200
+
+
+# ------------------ Instagram Publish API ------------------
+def _derive_public_base_url(req, override: str | None = None) -> str:
+    base = (override or os.environ.get("PUBLIC_BASE_URL") or request.host_url or "").strip()
+    # request.host_url already ends with '/'
+    if base.endswith("/"):
+        base = base[:-1]
+    return base
+
+
+@app.route("/api/instagram/publish", methods=["POST"])
+def instagram_publish():
+    """Publish media to Instagram using Graph API.
+
+    Request JSON supports:
+    - job_id: use reels job artifacts (preferred for reels)
+    - relative_path: path under uploads/ (e.g., "reels/r_xxx/reel_1080x1920.mp4")
+    - url: absolute public URL (skips path/base composition)
+    - kind: "reel" | "video" | "image" | "story" (default: "reel")
+    - caption: optional
+    - share_to_feed: bool (reels only, default true)
+    - public_base_url: optional override for building absolute URL
+    - dry_run: bool, if true do not call Graph API; return the resolved payload
+    """
+    if publish_video_or_reel is None and publish_single is None:
+        return jsonify({"error": "Instagram API helper not available"}), 500
+
+    try:
+        data = request.get_json(force=True) if request.is_json else (request.form or {})
+    except Exception:
+        data = request.get_json(silent=True) or {}
+
+    job_id = data.get("job_id")
+    relative_path = data.get("relative_path")
+    direct_url = data.get("url")
+    kind = (data.get("kind") or "reel").lower()
+    caption = data.get("caption")
+    share_to_feed = bool(data.get("share_to_feed", True))
+    public_base_url = data.get("public_base_url")
+    dry_run = bool(data.get("dry_run", False))
+
+    if not (job_id or relative_path or direct_url):
+        return jsonify({"error": "Provide one of job_id, relative_path, or url"}), 400
+
+    # Build absolute media URL
+    if direct_url:
+        media_url = direct_url
+    else:
+        base = _derive_public_base_url(request, public_base_url)
+        if not base:
+            return jsonify({"error": "Unable to derive PUBLIC_BASE_URL; set env or pass public_base_url"}), 400
+
+        if job_id:
+            if 'job_manager' not in globals() or job_manager is None:
+                return jsonify({"error": "Reels engine not available"}), 500
+            job = job_manager.get(job_id)
+            if not job:
+                return jsonify({"error": f"Job not found: {job_id}"}), 404
+            if job.status != "completed":
+                return jsonify({"error": f"Job not completed: {job.status}"}), 400
+            rel = (job.artifacts.best_reel_mp4 or "").lstrip("/")
+            if not rel:
+                return jsonify({"error": "No artifact best_reel_mp4 available"}), 400
+            media_url = f"{base}/{rel}"
+        else:
+            # relative_path under uploads/ served at /photos/<relative_path>
+            rel = str(relative_path).lstrip("/")
+            # Ensure file exists
+            fs_path = os.path.join(app.config["UPLOAD_FOLDER"], rel)
+            if not os.path.exists(fs_path):
+                return jsonify({"error": f"File not found under uploads/: {rel}"}), 404
+            media_url = f"{base}/photos/{rel}"
+
+    # Validate kind
+    if kind not in {"reel", "video", "image", "story"}:
+        return jsonify({"error": "Invalid kind. Use: reel | video | image | story"}), 400
+
+    # Dry run returns what would be sent
+    if dry_run:
+        return jsonify({
+            "dry_run": True,
+            "kind": kind,
+            "media_url": media_url,
+            "caption": caption,
+            "share_to_feed": share_to_feed,
+        }), 200
+
+    # Execute publish
+    try:
+        if kind in ("reel", "video"):
+            is_reel = (kind == "reel")
+            res = publish_video_or_reel(url=media_url, caption=caption, reel=is_reel, share_to_feed=share_to_feed)  # type: ignore
+            return jsonify({"status": "ok", "result": res, "media_url": media_url}), 200
+        elif kind == "image":
+            res = publish_single(is_story=False, media_kind="img", url=media_url, caption=caption)  # type: ignore
+            return jsonify({"status": "ok", "result": res, "media_url": media_url}), 200
+        else:  # story
+            # Assume image story here; extend to video story if needed by accepting media_kind
+            res = publish_single(is_story=True, media_kind="img", url=media_url, caption=None)  # type: ignore
+            return jsonify({"status": "ok", "result": res, "media_url": media_url}), 200
+    except Exception as e:
+        return jsonify({"error": f"Publish failed: {e}", "media_url": media_url}), 500
 
 def poll(agents: list[Path], files: list[str]) -> dict:
     """Poll agents to rate photos"""
