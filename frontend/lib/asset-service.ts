@@ -150,6 +150,12 @@ export class FlaskAssetService extends AssetService {
 
     // Handle videos (one by one)
     for (const vf of videoFiles) {
+      // Client-side size guard (e.g., 100MB)
+      const maxBytes = 100 * 1024 * 1024;
+      if (vf.size > maxBytes) {
+        errors.push(`${vf.name} exceeds ${(maxBytes / (1024*1024)).toFixed(0)}MB limit`);
+        continue;
+      }
       const form = new FormData();
       form.append('video', vf);
       const res = await fetch(`${this.baseUrl}/videos/upload`, { method: 'POST', body: form });

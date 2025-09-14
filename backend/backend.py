@@ -73,7 +73,8 @@ CORS(
 
 # Configuration
 UPLOAD_FOLDER = "uploads"
-MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
+# Allow overriding via env; default larger for videos (100MB)
+MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE_BYTES", 100 * 1024 * 1024))
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "bmp", "webp", "heic", "tiff"}
 ALLOWED_MIME_TYPES = {
     "image/png",
@@ -778,6 +779,16 @@ def get_video(filename):
 @app.route("/videos/upload", methods=["POST"])
 def upload_video():
     """Upload mp4/mov video into uploads/ and return its path for reels input."""
+    # Pre-flight size check to avoid 413 where possible
+    try:
+        content_length = request.content_length or 0
+        if content_length and content_length > app.config.get("MAX_CONTENT_LENGTH", MAX_FILE_SIZE):
+            return jsonify({
+                "error": "File too large",
+                "max_size_mb": (app.config.get("MAX_CONTENT_LENGTH", MAX_FILE_SIZE) // (1024 * 1024))
+            }), 413
+    except Exception:
+        pass
     if "video" not in request.files:
         return jsonify({"error": "No video file provided"}), 400
     file = request.files["video"]
