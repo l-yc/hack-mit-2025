@@ -1,6 +1,7 @@
 import glob
 import os
 import re
+import ssl
 from typing import Optional
 import uuid
 import yaml
@@ -27,15 +28,29 @@ except Exception:
 
 app = Flask(__name__)
 # Configure CORS
-allowed = [
+allowed_origins = [
     "https://hackmit-2025-nine.vercel.app",
     "http://hackmit-2025-nine.vercel.app",
     "http://localhost:3000",
+    "https://localhost:3000",  # Add HTTPS localhost
+    "http://localhost:6741",   # Add backend port
+    "https://localhost:6741",  # Add HTTPS backend port
 ]
+
+# Add environment-specific origins
+if os.environ.get("CORS_ORIGINS"):
+    additional_origins = [origin.strip() for origin in os.environ.get("CORS_ORIGINS", "").split(",")]
+    allowed_origins.extend(additional_origins)
+
 preview_regex = re.compile(r"^https://.*\.vercel\.app$")
+
+# Configure CORS with HTTPS support
 CORS(
     app,
-    origins="*"
+    origins=allowed_origins,
+    supports_credentials=True,
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 )
 
 
@@ -58,6 +73,12 @@ ALLOWED_MIME_TYPES = {
 AGENTS_FOLDER = Path(__file__).parent / "prompts" / "agents"
 PROMPTS_FOLDER = Path(__file__).parent / "prompts"
 
+# SSL Configuration
+SSL_CERT_PATH = os.environ.get("SSL_CERT_PATH", "")
+SSL_KEY_PATH = os.environ.get("SSL_KEY_PATH", "")
+SSL_ENABLED = os.environ.get("SSL_ENABLED", "false").lower() in ("true", "1", "yes")
+SSL_CONTEXT = None
+
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 
@@ -65,6 +86,89 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_FOLDER, "cleaned"), exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_FOLDER, "edited"), exist_ok=True)
+
+
+def create_ssl_context():
+    """Create SSL context for HTTPS support"""
+    global SSL_CONTEXT
+    
+    if not SSL_ENABLED:
+        return None
+    
+    if not SSL_CERT_PATH or not SSL_KEY_PATH:
+        print("Warning: SSL enabled but SSL_CERT_PATH or SSL_KEY_PATH not set")
+        return None
+    
+    if not os.path.exists(SSL_CERT_PATH):
+        print(f"Warning: SSL certificate file not found: {SSL_CERT_PATH}")
+        return None
+    
+    if not os.path.exists(SSL_KEY_PATH):
+        print(f"Warning: SSL private key file not found: {SSL_KEY_PATH}")
+        return None
+    
+    try:
+        # Create SSL context
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(SSL_CERT_PATH, SSL_KEY_PATH)
+        
+        # Set security options
+        context.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS')
+        context.options |= ssl.OP_NO_SSLv2
+        context.options |= ssl.OP_NO_SSLv3
+        context.options |= ssl.OP_NO_TLSv1
+        context.options |= ssl.OP_NO_TLSv1_1
+        
+        # Set minimum TLS version
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        
+        print(f"SSL context created successfully")
+        print(f"Certificate: {SSL_CERT_PATH}")
+        print(f"Private key: {SSL_KEY_PATH}")
+        
+        return context
+        
+    except Exception as e:
+        print(f"Error creating SSL context: {e}")
+        return None
+
+
+def validate_ssl_configuration():
+    """Validate SSL configuration and provide helpful messages"""
+    if not SSL_ENABLED:
+        print("SSL is disabled. Set SSL_ENABLED=true to enable HTTPS")
+        return True
+    
+    if not SSL_CERT_PATH:
+        print("Error: SSL_ENABLED=true but SSL_CERT_PATH not set")
+        print("Set SSL_CERT_PATH environment variable to the path of your SSL certificate")
+        return False
+    
+    if not SSL_KEY_PATH:
+        print("Error: SSL_ENABLED=true but SSL_KEY_PATH not set")
+        print("Set SSL_KEY_PATH environment variable to the path of your SSL private key")
+        return False
+    
+    if not os.path.exists(SSL_CERT_PATH):
+        print(f"Error: SSL certificate file not found: {SSL_CERT_PATH}")
+        print("Generate SSL certificates using: python generate_ssl_cert.py")
+        return False
+    
+    if not os.path.exists(SSL_KEY_PATH):
+        print(f"Error: SSL private key file not found: {SSL_KEY_PATH}")
+        print("Generate SSL certificates using: python generate_ssl_cert.py")
+        return False
+    
+    return True
+
+
+# Initialize SSL context
+if SSL_ENABLED:
+    if validate_ssl_configuration():
+        SSL_CONTEXT = create_ssl_context()
+    else:
+        print("SSL configuration validation failed. Falling back to HTTP")
+        SSL_ENABLED = False
 
 
 import json  # make sure this is imported
@@ -1597,6 +1701,29 @@ def parse_caption_text_response(captions_text):
     return captions
 
 
+def format_song_recommendations(recommendations):
+    """Format and validate song recommendations"""
+    formatted_songs = []
+    
+    for song in recommendations:
+        if isinstance(song, dict):
+            formatted_song = {
+                "title": song.get("title", ""),
+                "artist": song.get("artist", ""),
+                "genre": song.get("genre", ""),
+                "coherence_reason": song.get("coherence_reason", ""),
+                "energy_level": song.get("energy_level", ""),
+                "mood_keywords": song.get("mood_keywords", []),
+                "platform_appropriate": song.get("platform_appropriate", True),
+                "licensing_note": song.get("licensing_note", ""),
+                "link": song.get("link", ""),
+                "links": song.get("links", {})
+            }
+            formatted_songs.append(formatted_song)
+    
+    return formatted_songs
+
+
 def format_photo_captions(captions_response, photo_paths, post_type_fallback="sharing"):
     """Format and validate photo captions"""
     formatted_captions = {}
@@ -1688,4 +1815,25 @@ def list_agents():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=6741)
+    # Get configuration from environment variables
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", 6741))
+    debug = os.environ.get("DEBUG", "false").lower() in ("true", "1", "yes")
+    
+    # Determine protocol
+    protocol = "HTTPS" if SSL_ENABLED and SSL_CONTEXT else "HTTP"
+    
+    print(f"Starting Flask backend server...")
+    print(f"Protocol: {protocol}")
+    print(f"Host: {host}")
+    print(f"Port: {port}")
+    print(f"Debug: {debug}")
+    
+    if SSL_ENABLED and SSL_CONTEXT:
+        print(f"SSL Certificate: {SSL_CERT_PATH}")
+        print(f"SSL Private Key: {SSL_KEY_PATH}")
+        print(f"Server will be available at: https://{host}:{port}")
+        app.run(host=host, port=port, debug=debug, ssl_context=SSL_CONTEXT)
+    else:
+        print(f"Server will be available at: http://{host}:{port}")
+        app.run(host=host, port=port, debug=debug)
