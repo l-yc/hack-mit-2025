@@ -1,4 +1,4 @@
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 from jinja2 import Environment, BaseLoader, Template, Undefined
 
