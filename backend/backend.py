@@ -19,6 +19,23 @@ from werkzeug.utils import secure_filename
 
 from PIL import Image
 
+# Reels engine (import with package-aware fallback)
+job_manager = None  # type: ignore
+JobRequest = None  # type: ignore
+try:  # Prefer relative import when running as a package (python -m backend.backend)
+    from .reels_engine import job_manager as _jm  # type: ignore
+    from .reels_engine.schemas import JobRequest as _JR  # type: ignore
+    job_manager = _jm
+    JobRequest = _JR
+except Exception:
+    try:
+        from reels_engine import job_manager as _jm2  # type: ignore
+        from reels_engine.schemas import JobRequest as _JR2  # type: ignore
+        job_manager = _jm2
+        JobRequest = _JR2
+    except Exception as _e:
+        print(f"Reels engine unavailable: {_e}")
+
 try:
     # Load .env if present
     from dotenv import load_dotenv
@@ -86,6 +103,14 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_FOLDER, "cleaned"), exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_FOLDER, "edited"), exist_ok=True)
+os.makedirs(os.path.join(UPLOAD_FOLDER, "reels"), exist_ok=True)
+
+# Start minimal reels worker if available
+if job_manager is not None:
+    try:
+        job_manager.start()
+    except Exception as _e:
+        print(f"Failed to start reels engine: {_e}")
 
 
 def create_ssl_context():
@@ -721,6 +746,29 @@ def get_photo(filename):
         return jsonify({"error": "Photo not found"}), 404
 
 
+@app.route("/videos/upload", methods=["POST"])
+def upload_video():
+    """Upload mp4/mov video into uploads/ and return its path for reels input."""
+    if "video" not in request.files:
+        return jsonify({"error": "No video file provided"}), 400
+    file = request.files["video"]
+    if file.filename == "":
+        return jsonify({"error": "No file selected"}), 400
+    allowed_ext = {"mp4", "mov", "m4v"}
+    ext = file.filename.rsplit(".", 1)[-1].lower()
+    if ext not in allowed_ext:
+        return jsonify({"error": "Unsupported video type", "allowed": list(allowed_ext)}), 400
+    original_filename = secure_filename(file.filename)
+    unique_filename = generate_unique_filename(original_filename)
+    path = os.path.join(app.config["UPLOAD_FOLDER"], unique_filename)
+    file.save(path)
+    return jsonify({
+        "message": "Video uploaded",
+        "filename": unique_filename,
+        "video_url": path.replace("\\", "/")
+    }), 201
+
+
 @app.route("/photos", methods=["GET"])
 def list_photos():
     """List all uploaded photos"""
@@ -979,6 +1027,86 @@ def images_edit():
         )
     except Exception as e:
         return jsonify({"error": f"Edit failed: {str(e)}"}), 500
+
+
+# ------------------ Reels API ------------------
+@app.route("/api/reels/jobs", methods=["POST"])
+def create_reels_job():
+    if 'job_manager' not in globals() or JobRequest is None:
+        return jsonify({"error": "Reels engine not available"}), 500
+
+    try:
+        data = request.get_json(force=True)
+        # Normalize postpass
+        postpass = data.get("postpass") or {}
+        try:
+            from .reels_engine.schemas import Postpass as _PP  # type: ignore
+        except Exception:
+            try:
+                from reels_engine.schemas import Postpass as _PP  # type: ignore
+            except Exception:
+                _PP = None  # type: ignore
+        if _PP is not None and isinstance(postpass, dict):
+            postpass_obj = _PP(**{k: v for k, v in postpass.items() if k in {"nano_banana", "tone"}})
+        else:
+            postpass_obj = postpass
+
+        video_url = data.get("video_url")
+        video_urls = data.get("video_urls") or []
+        directory = data.get("directory")
+        if not video_url and not video_urls and not directory:
+            return jsonify({"error": "Provide 'video_url' or 'video_urls' or 'directory'"}), 400
+
+        req = JobRequest(
+            video_url=video_url,
+            video_urls=video_urls,
+            directory=directory,
+            mode=data.get("mode", "single"),
+            target_duration_sec=float(data.get("target_duration_sec", 15)),
+            min_duration_sec=float(data.get("min_duration_sec", 9)),
+            max_duration_sec=float(data.get("max_duration_sec", 20)),
+            aspect=data.get("aspect", "9:16"),
+            speech_mode=bool(data.get("speech_mode", True)),
+            music_mode=bool(data.get("music_mode", False)),
+            top_k_candidates=int(data.get("top_k_candidates", 3)),
+            per_segment_sec=float(data.get("per_segment_sec", 3.0)),
+            max_files=int(data.get("max_files", 12)),
+            keywords=list(data.get("keywords", [])),
+            brand_faces_whitelist=list(data.get("brand_faces_whitelist", [])),
+            crop_safe_margin_pct=float(data.get("crop_safe_margin_pct", 0.05)),
+            postpass=postpass_obj,  # ignored in minimal MVP
+            webhook_url=data.get("webhook_url"),
+            music_url=data.get("music_url"),
+            music_gain_db=float(data.get("music_gain_db", -8.0)),
+            duck_music=bool(data.get("duck_music", True)),
+            music_only=bool(data.get("music_only", False)),
+            end_with_low=bool(data.get("end_with_low", True)),
+        )
+        job = job_manager.enqueue(req)
+        return jsonify({"job_id": job.id, "status": job.status}), 202
+    except Exception as e:
+        return jsonify({"error": f"Failed to create job: {e}"}), 400
+
+
+@app.route("/api/reels/jobs/<job_id>", methods=["GET"])
+def get_reels_job(job_id: str):
+    if 'job_manager' not in globals():
+        return jsonify({"error": "Reels engine not available"}), 500
+    job = job_manager.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    resp = {
+        "status": job.status,
+        "error": job.error,
+        "artifacts": {
+            "best_reel_mp4": job.artifacts.best_reel_mp4,
+            "alt_candidates": job.artifacts.alt_candidates,
+            "captions_srt": job.artifacts.captions_srt,
+            "timeline_json": job.artifacts.timeline_json,
+            "cover_jpg": job.artifacts.cover_jpg,
+        },
+    }
+    return jsonify(resp), 200
 
 def poll(agents: list[Path], files: list[str]) -> dict:
     """Poll agents to rate photos"""

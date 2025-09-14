@@ -59,6 +59,7 @@ python-daemon==2.3.0
 python-dateutil==2.8.1
 pytz==2022.7.1
 PyYAML==5.4.1
+imageio-ffmpeg==0.4.9
 release-notification==1.2
 requests==2.25.1
 rpm==4.16.1.3
