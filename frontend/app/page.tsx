@@ -19,6 +19,7 @@ export default function AssetsPage() {
   const [showTagInput, setShowTagInput] = useState<string | null>(null);
   const [newTag, setNewTag] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -239,7 +240,7 @@ export default function AssetsPage() {
         {/* Asset Grid Items */}
       {filteredAssets.map((asset) => (
         <div key={asset.id} className="relative group aspect-square">
-          <div className="w-full h-full rounded-lg overflow-hidden bg-gray-100">
+          <div className="w-full h-full rounded-lg overflow-hidden bg-gray-100 cursor-pointer" onClick={() => setPreviewAsset(asset)}>
             {asset.type.startsWith('image') ? (
               <img
                 src={asset.url}
@@ -260,6 +261,13 @@ export default function AssetsPage() {
               />
             )}
             
+            {/* Type badge */}
+            <div className="absolute top-2 right-2">
+              <span className={`px-2 py-1 rounded text-xs font-medium ${asset.type.startsWith('video') ? 'bg-blue-600 text-white' : 'bg-emerald-600 text-white'}`}>
+                {asset.type.startsWith('video') ? 'Video' : 'Photo'}
+              </span>
+            </div>
+
             {/* Metadata overlay on hover */}
             <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all duration-200 flex flex-col justify-between p-3 opacity-0 group-hover:opacity-80 rounded-lg">
               <div className="flex flex-col space-y-1 text-white text-xs pointer-events-none">
@@ -404,6 +412,34 @@ export default function AssetsPage() {
           <p className="mt-2 text-gray-500">
             Click the upload button above to add your first photo or video.
           </p>
+        </div>
+      )}
+
+      {/* Preview Modal */}
+      {previewAsset && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setPreviewAsset(null)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b">
+              <h3 className="text-lg font-semibold text-gray-900 truncate">{previewAsset.name}</h3>
+              <button onClick={() => setPreviewAsset(null)} className="text-gray-500 hover:text-gray-700 cursor-pointer">
+                <XMarkIcon className="h-6 w-6" />
+              </button>
+            </div>
+            <div className="p-4 bg-gray-50">
+              <div className={`w-full ${previewAsset.type.startsWith('video') ? 'aspect-[9/16] max-w-xs mx-auto' : 'aspect-square max-w-md mx-auto'} bg-black rounded-lg overflow-hidden`}>
+                {previewAsset.type.startsWith('video') ? (
+                  <video src={previewAsset.url} controls className="w-full h-full object-contain bg-black" />
+                ) : (
+                  <img src={previewAsset.url} alt={previewAsset.name} className="w-full h-full object-contain bg-black" />
+                )}
+              </div>
+            </div>
+            <div className="px-4 pb-4 text-sm text-gray-600">
+              <div>Type: {previewAsset.type}</div>
+              <div>Size: {(previewAsset.size / 1024).toFixed(1)} KB</div>
+              <div>Date: {previewAsset.created_at ? new Date(previewAsset.created_at).toLocaleString() : 'Unknown'}</div>
+            </div>
+          </div>
         </div>
       )}
     </div>

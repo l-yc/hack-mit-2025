@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from 'react';
 import { PaperAirplaneIcon, ArrowDownTrayIcon, ShareIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import { useAppContext } from '@/lib/context';
 import { Asset } from '@/lib/asset-service';
-import JSZip from 'jszip';
 
 type Message = {
   id: string;
@@ -87,7 +86,6 @@ export default function GenerateContentPage() {
   const [showContentTypes, setShowContentTypes] = useState(!selectedContentType);
   const [inputMessage, setInputMessage] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Load assets from Supabase
@@ -317,7 +315,8 @@ export default function GenerateContentPage() {
             body: JSON.stringify({
               n: photoCount,
               post_type: `${selectedContentType?.name || 'Post'} about ${subject}`,
-              agents: selectedAgents.map(agent => agent.path)
+              agents: selectedAgents.map(agent => agent.path),
+              auto_cleanup: false,
             }),
           });
 
@@ -430,62 +429,16 @@ export default function GenerateContentPage() {
     }
   };
 
-  const downloadContent = async () => {
-    if (!postCaption || selectedAssets.length === 0) return;
+  const downloadContent = () => {
+    if (!postCaption) return;
     
-    setIsDownloading(true);
-    
-    try {
-      const zip = new JSZip();
-      
-      // Add caption to zip
-      if (postCaption) {
-        zip.file('caption.txt', postCaption);
-      }
-      
-      // Add photos to zip
-      for (let i = 0; i < selectedAssets.length; i++) {
-        const asset = selectedAssets[i];
-        try {
-          // Fetch the image
-          const response = await fetch(asset.url);
-          const blob = await response.blob();
-          
-          // Get file extension from URL or default to jpg
-          const urlParts = asset.url.split('.');
-          const extension = urlParts.length > 1 ? urlParts[urlParts.length - 1].split('?')[0] : 'jpg';
-          
-          // Add to zip with numbered filename
-          zip.file(`photo_${i + 1}.${extension}`, blob);
-        } catch (error) {
-          console.error(`Error downloading photo ${i + 1}:`, error);
-        }
-      }
-      
-      // Generate and download the zip file
-      const zipBlob = await zip.generateAsync({ type: 'blob' });
-      const element = document.createElement('a');
-      element.href = URL.createObjectURL(zipBlob);
-      element.download = `${selectedContentType?.name?.replace(/\s+/g, '_') || 'content'}_export.zip`;
-      document.body.appendChild(element);
-      element.click();
-      document.body.removeChild(element);
-      
-      // Clean up the URL
-      URL.revokeObjectURL(element.href);
-    } catch (error) {
-      console.error('Error creating zip file:', error);
-      // Fallback to just downloading the caption
-      const element = document.createElement('a');
-      const file = new Blob([postCaption], { type: 'text/plain' });
-      element.href = URL.createObjectURL(file);
-      element.download = `${selectedContentType?.name || 'content'}.txt`;
-      document.body.appendChild(element);
-      element.click();
-      document.body.removeChild(element);
-    } finally {
-      setIsDownloading(false);
-    }
+    const element = document.createElement('a');
+    const file = new Blob([postCaption], { type: 'text/plain' });
+    element.href = URL.createObjectURL(file);
+    element.download = `${selectedContentType?.name || 'content'}.txt`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
   };
 
   const postToInstagram = () => {
@@ -600,24 +553,10 @@ export default function GenerateContentPage() {
                 <>
                   <button
                     onClick={downloadContent}
-                    disabled={isDownloading}
-                    className={`flex items-center px-3 py-2 rounded-lg transition-colors ${
-                      isDownloading 
-                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
-                    }`}
+                    className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer"
                   >
-                    {isDownloading ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-500 border-t-transparent mr-1"></div>
-                        Creating...
-                      </>
-                    ) : (
-                      <>
-                        <ArrowDownTrayIcon className="h-4 w-4 mr-1" />
-                        Save
-                      </>
-                    )}
+                    <ArrowDownTrayIcon className="h-4 w-4 mr-1" />
+                    Save
                   </button>
                   <button
                     onClick={postToInstagram}
@@ -966,3 +905,5 @@ export default function GenerateContentPage() {
     </div>
   );
 }
+
+            

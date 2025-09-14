@@ -94,79 +94,83 @@ export class FlaskAssetService extends AssetService {
   }
 
   async uploadAssets(files: File[]): Promise<AssetUploadResult> {
-    const formData = new FormData();
-    
-    if (files.length === 1) {
-      // Compress image before upload
-      const compressedFile = files[0].type.startsWith('image/') 
-        ? await this.compressImage(files[0])
-        : files[0];
-      formData.append('photo', compressedFile);
-      
-      const response = await fetch(`${this.baseUrl}/upload`, {
-        method: 'POST',
-        body: formData,
-      });
+    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    const videoFiles = files.filter(f => f.type.startsWith('video/'));
+    const uploadedAssets: Asset[] = [];
+    const errors: string[] = [];
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Upload failed');
+    // Handle images
+    if (imageFiles.length === 1) {
+      const formData = new FormData();
+      const compressed = await this.compressImage(imageFiles[0]);
+      formData.append('photo', compressed);
+      const res = await fetch(`${this.baseUrl}/upload`, { method: 'POST', body: formData });
+      if (res.ok) {
+        const result = await res.json();
+        uploadedAssets.push({
+          id: result.filename,
+          name: imageFiles[0].name,
+          url: `${this.baseUrl}${result.file_url}`,
+          type: imageFiles[0].type || 'image/jpeg',
+          size: result.size_bytes,
+          tags: [],
+          metadata: {},
+          created_at: result.upload_time,
+        });
+      } else {
+        try { const j = await res.json(); errors.push(j.error || 'Image upload failed'); } catch { errors.push('Image upload failed'); }
       }
-
-      const result = await response.json();
-      
-      // Convert Flask response to Asset format
-      const asset: Asset = {
-        id: result.filename, // Use filename as ID for Flask backend
-        name: result.original_filename,
-        url: `${this.baseUrl}${result.file_url}`,
-        type: files[0].type,
-        size: result.size_bytes,
-        tags: [],
-        metadata: {},
-        created_at: result.upload_time,
-      };
-
-      return { assets: [asset] };
-    } else {
-      // Multiple file upload - compress each image
+    } else if (imageFiles.length > 1) {
+      const formData = new FormData();
       const compressedFiles = await Promise.all(
-        files.map(file => 
-          file.type.startsWith('image/') 
-            ? this.compressImage(file)
-            : Promise.resolve(file)
-        )
+        imageFiles.map(file => this.compressImage(file))
       );
       compressedFiles.forEach(file => formData.append('photos', file));
-      
-      const response = await fetch(`${this.baseUrl}/upload/multiple`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Upload failed');
+      const res = await fetch(`${this.baseUrl}/upload/multiple`, { method: 'POST', body: formData });
+      if (res.ok) {
+        const result = await res.json();
+        const assets: Asset[] = result.uploaded_files.map((file: any, index: number) => ({
+          id: file.filename,
+          name: imageFiles[index]?.name || file.original_filename,
+          url: `${this.baseUrl}${file.file_url}`,
+          type: imageFiles[index]?.type || 'image/jpeg',
+          size: file.size_bytes,
+          tags: [],
+          metadata: {},
+          created_at: result.upload_time,
+        }));
+        uploadedAssets.push(...assets);
+        if (result.errors && result.errors.length > 0) {
+          errors.push(...result.errors);
+        }
+      } else {
+        try { const j = await res.json(); errors.push(j.error || 'Images upload failed'); } catch { errors.push('Images upload failed'); }
       }
-
-      const result = await response.json();
-      
-      const assets: Asset[] = result.uploaded_files.map((file: any, index: number) => ({
-        id: file.filename,
-        name: file.original_filename,
-        url: `${this.baseUrl}${file.file_url}`,
-        type: files[index]?.type || 'image/jpeg',
-        size: file.size_bytes,
-        tags: [],
-        metadata: {},
-        created_at: result.upload_time,
-      }));
-
-      return { 
-        assets,
-        errors: result.errors?.length > 0 ? result.errors : undefined
-      };
     }
+
+    // Handle videos (one by one)
+    for (const vf of videoFiles) {
+      const form = new FormData();
+      form.append('video', vf);
+      const res = await fetch(`${this.baseUrl}/videos/upload`, { method: 'POST', body: form });
+      if (res.ok) {
+        const data = await res.json();
+        uploadedAssets.push({
+          id: data.filename,
+          name: vf.name,
+          url: `${this.baseUrl}${data.video_url}`,
+          type: vf.type || 'video/mp4',
+          size: vf.size,
+          tags: [],
+          metadata: {},
+          created_at: new Date().toISOString(),
+        });
+      } else {
+        try { const j = await res.json(); errors.push(j.error || `Video upload failed: ${vf.name}`); } catch { errors.push(`Video upload failed: ${vf.name}`); }
+      }
+    }
+
+    return { assets: uploadedAssets, errors: errors.length > 0 ? errors : undefined };
   }
 
   async getAssets(options?: AssetSearchOptions): Promise<Asset[]> {
@@ -179,17 +183,23 @@ export class FlaskAssetService extends AssetService {
 
     const result = await response.json();
     
-    // Convert Flask photos to Asset format
-    let assets: Asset[] = result.photos.map((photo: any) => ({
-      id: photo.filename,
-      name: photo.filename,
-      url: `${this.baseUrl}${photo.file_url}`,
-      type: 'image/jpeg', // Default type since Flask doesn't store this
-      size: photo.size_bytes,
-      tags: [], // Flask backend doesn't store tags yet
-      metadata: {},
-      created_at: photo.modified_time,
-    }));
+    // Convert Flask files to Asset format; infer type by extension
+    let assets: Asset[] = result.photos.map((file: any) => {
+      const name: string = file.filename || '';
+      const ext = name.split('.').pop()?.toLowerCase() || '';
+      const isVideo = ['mp4', 'mov', 'm4v', 'webm'].includes(ext);
+      const type = isVideo ? 'video/mp4' : (['png','gif','webp','jpeg','jpg'].includes(ext) ? `image/${ext === 'jpg' ? 'jpeg' : ext}` : 'application/octet-stream');
+      return {
+        id: file.filename,
+        name: file.filename,
+        url: `${this.baseUrl}${file.file_url}`,
+        type,
+        size: file.size_bytes,
+        tags: [],
+        metadata: {},
+        created_at: file.modified_time,
+      } as Asset;
+    });
 
     // Apply client-side filtering if options provided
     if (options?.query) {
