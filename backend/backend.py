@@ -27,8 +27,8 @@ ALLOWED_MIME_TYPES = {
     "image/bmp",
     "image/webp",
 }
-AGENTS_FOLDER = Path("./prompts/agents/")
-PROMPTS_FOLDER = Path("./prompts/")
+AGENTS_FOLDER = Path(__file__).parent / "prompts" / "agents"
+PROMPTS_FOLDER = Path(__file__).parent / "prompts"
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
@@ -560,7 +560,7 @@ def list_agents():
                 {
                     "agents": agents,
                     "total_count": len(agents),
-                    "agents_folder": AGENTS_FOLDER,
+                    "agents_folder": str(AGENTS_FOLDER),
                 }
             ),
             200,
