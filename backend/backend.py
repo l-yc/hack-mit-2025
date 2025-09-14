@@ -27,7 +27,7 @@ except Exception:
 
 app = Flask(__name__)
 # Configure CORS
-CORS(app)
+CORS(app, origins=['*'])
 app.config["CORS_HEADERS"] = "Content-Type"
 
 # Configuration
