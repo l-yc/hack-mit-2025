@@ -351,13 +351,71 @@ export default function GenerateContentPage() {
             } else {
               const chosen = availableVideos.slice(0, photoCount);
               setSelectedAssets(chosen as any);
-              aiResponse = {
-                id: (Date.now() + 1).toString(),
-                type: 'assistant',
-                content: `Selected ${chosen.length} video clip(s) for your Reel. You can preview them above.`,
-                timestamp: new Date(),
-              };
-              setChatFlow('complete');
+              // Create reels job and poll for video
+              // Backend expects server-side relative paths under uploads/
+              const video_urls = chosen.map(v => `uploads/${v.id}`);
+              const jobRes = await fetch(`${process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741'}/api/reels/jobs`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  video_urls,
+                  aspect: '9:16',
+                  target_duration_sec: 15,
+                  top_k_candidates: photoCount,
+                })
+              });
+              const jobData = await jobRes.json();
+              console.log(jobData);
+              if (!jobRes.ok || !jobData.job_id) {
+                aiResponse = {
+                  id: (Date.now() + 1).toString(),
+                  type: 'assistant',
+                  content: 'Sorry, I could not start the Reel render. Please try again.',
+                  timestamp: new Date(),
+                };
+                setChatFlow('photos');
+              } else {
+                aiResponse = {
+                  id: (Date.now() + 1).toString(),
+                  type: 'assistant',
+                  content: `Rendering your Reel from ${chosen.length} clip(s). I'll let you know when it's ready...`,
+                  timestamp: new Date(),
+                };
+                setChatFlow('generating');
+                const poll = async () => {
+                  const s = await fetch(`${process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741'}/api/reels/jobs/${jobData.job_id}`);
+                  const sj = await s.json();
+                  if (sj.status === 'done') {
+                    // Replace selected asset with the resulting reel
+                    if (sj.artifacts?.best_reel_mp4) {
+                      setSelectedAssets([
+                        {
+                          id: 'reel_output.mp4',
+                          name: 'reel_output.mp4',
+                          url: `${process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741'}${sj.artifacts.best_reel_mp4}`,
+                          type: 'video/mp4',
+                          size: 0,
+                          tags: [],
+                          metadata: {},
+                          created_at: new Date().toISOString(),
+                        } as any
+                      ]);
+                    }
+                    setChatFlow('complete');
+                  } else if (sj.status === 'failed') {
+                    aiResponse = {
+                      id: (Date.now() + 1).toString(),
+                      type: 'assistant',
+                      content: 'Sorry, the Reel rendering failed. Please try again.',
+                      timestamp: new Date(),
+                    };
+                    setChatFlow('photos');
+                  } else {
+                    setTimeout(poll, 1500);
+                  }
+                };
+                setTimeout(poll, 1200);
+              }
             }
           } else {
             const response = await fetch(`${process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741'}/select`, {
@@ -497,9 +555,81 @@ export default function GenerateContentPage() {
     document.body.removeChild(element);
   };
 
-  const postToInstagram = () => {
-    // This would integrate with Instagram's API
-    alert('Instagram posting feature would be implemented here with proper API integration');
+  const postToInstagram = async () => {
+    try {
+      const base = process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741';
+      let body: any = { kind: 'reel' };
+      if (selectedContentType?.id === 'instagram-reel') {
+        // Use the rendered reel if available, otherwise first selected asset
+        const videoAsset = selectedAssets[0];
+        let relativePath = '';
+        if (videoAsset?.url?.startsWith(base)) {
+          // Convert absolute to relative path served by backend
+          relativePath = videoAsset.url.replace(base + '/', '');
+        } else if (videoAsset?.url?.startsWith('/')) {
+          relativePath = videoAsset.url.slice(1);
+        } else {
+          relativePath = `videos/${videoAsset?.id}`;
+        }
+        body = {
+          kind: 'reel',
+          // Try direct url first; backend accepts either url or relative_path
+          url: videoAsset?.url,
+          relative_path: relativePath.replace(/^videos\//, ''),
+          share_to_feed: true,
+          caption: undefined,
+        };
+      } else if (selectedContentType?.id === 'instagram-post') {
+        // Post: first image
+        const img = selectedAssets[0];
+        let relative = '';
+        if (img?.url?.startsWith(base)) {
+          relative = img.url.replace(base + '/photos/', '');
+        } else if (img?.url?.startsWith('/photos/')) {
+          relative = img.url.replace('/photos/', '');
+        } else {
+          relative = img?.id || '';
+        }
+        body = {
+          kind: 'image',
+          url: img?.url,
+          relative_path: relative,
+          caption: (postCaption || '').trim() || undefined,
+        };
+      } else if (selectedContentType?.id === 'instagram-story') {
+        // Story: first image
+        const img = selectedAssets[0];
+        let relative = '';
+        if (img?.url?.startsWith(base)) {
+          relative = img.url.replace(base + '/photos/', '');
+        } else if (img?.url?.startsWith('/photos/')) {
+          relative = img.url.replace('/photos/', '');
+        } else {
+          relative = img?.id || '';
+        }
+        body = {
+          kind: 'story',
+          url: img?.url,
+          relative_path: relative,
+        };
+      }
+
+      const res = await fetch(`${base}/api/instagram/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        console.error('Instagram publish failed:', data);
+        alert(`Failed to publish: ${data.error || res.statusText}`);
+        return;
+      }
+      alert('Shared to Instagram (Graph API).');
+    } catch (e: any) {
+      console.error(e);
+      alert('Failed to share to Instagram. Check console for details.');
+    }
   };
 
   const initializeChatFlow = (contentType: ContentType) => {
@@ -654,69 +784,77 @@ export default function GenerateContentPage() {
           ) : (chatFlow === 'complete' || chatFlow === 'generating') && selectedAssets.length > 0 ? (
             <div className="space-y-6">
 
-              {/* Image Carousel */}
+              {/* Media Preview */}
               <div className="bg-gray-50 rounded-lg p-6">
                 <div className="relative">
-                  <div 
-                    className={`${selectedContentType?.id === 'instagram-story' ? 'aspect-[9/16] max-w-xs' : 'aspect-square max-w-md'} bg-white rounded-lg overflow-hidden border border-gray-200 mx-auto cursor-grab active:cursor-grabbing`}
-                    onMouseDown={handleDragStart}
-                    onMouseMove={handleDragMove}
-                    onMouseUp={handleDragEnd}
-                    onMouseLeave={handleDragEnd}
-                    onTouchStart={handleDragStart}
-                    onTouchMove={handleDragMove}
-                    onTouchEnd={handleDragEnd}
-                  >
-                    {selectedAssets.length > 0 && (
-                      <div className="relative w-full h-full overflow-hidden">
-                        {/* Image Container - slides as one unit */}
-                        <div 
-                          className={`flex ${slideDirection ? 'transition-transform duration-300 ease-out' : ''}`}
-                          style={{
-                            transform: `translateX(calc(-33.333% + ${dragOffset * 0.5}px)) ${
-                              slideDirection === 'left' ? 'translateX(-33.333%)' : 
-                              slideDirection === 'right' ? 'translateX(33.333%)' : ''
-                            }`,
-                            width: '300%',
-                            height: '100%'
-                          }}
-                        >
-                          {/* Previous Image */}
-                          <div className="flex-shrink-0" style={{ width: '33.333%', height: '100%' }}>
-                            <img
-                              src={selectedAssets[(currentImageIndex - 1 + selectedAssets.length) % selectedAssets.length]?.url || '/api/placeholder/400/400'}
-                              alt="Previous image"
-                              className="w-full h-full object-cover select-none"
-                              draggable={false}
-                            />
-                          </div>
-                          
-                          {/* Current Image */}
-                          <div className="flex-shrink-0" style={{ width: '33.333%', height: '100%' }}>
-                            <img
-                              src={selectedAssets[currentImageIndex]?.url || '/api/placeholder/400/400'}
-                              alt={selectedAssets[currentImageIndex]?.name || 'Selected asset'}
-                              className="w-full h-full object-cover select-none"
-                              draggable={false}
-                            />
-                          </div>
-                          
-                          {/* Next Image */}
-                          <div className="flex-shrink-0" style={{ width: '33.333%', height: '100%' }}>
-                            <img
-                              src={selectedAssets[(currentImageIndex + 1) % selectedAssets.length]?.url || '/api/placeholder/400/400'}
-                              alt="Next image"
-                              className="w-full h-full object-cover select-none"
-                              draggable={false}
-                            />
+                  {selectedContentType?.id === 'instagram-reel' ? (
+                    <div className="aspect-[9/16] max-w-xs bg-black rounded-lg overflow-hidden border border-gray-200 mx-auto">
+                      {selectedAssets.length > 0 && (
+                        <video src={selectedAssets[0]?.url} controls className="w-full h-full object-contain bg-black" />
+                      )}
+                    </div>
+                  ) : (
+                    <div 
+                      className={`${selectedContentType?.id === 'instagram-story' ? 'aspect-[9/16] max-w-xs' : 'aspect-square max-w-md'} bg-white rounded-lg overflow-hidden border border-gray-200 mx-auto cursor-grab active:cursor-grabbing`}
+                      onMouseDown={handleDragStart}
+                      onMouseMove={handleDragMove}
+                      onMouseUp={handleDragEnd}
+                      onMouseLeave={handleDragEnd}
+                      onTouchStart={handleDragStart}
+                      onTouchMove={handleDragMove}
+                      onTouchEnd={handleDragEnd}
+                    >
+                      {selectedAssets.length > 0 && (
+                        <div className="relative w-full h-full overflow-hidden">
+                          {/* Image Container - slides as one unit */}
+                          <div 
+                            className={`flex ${slideDirection ? 'transition-transform duration-300 ease-out' : ''}`}
+                            style={{
+                              transform: `translateX(calc(-33.333% + ${dragOffset * 0.5}px)) ${
+                                slideDirection === 'left' ? 'translateX(-33.333%)' : 
+                                slideDirection === 'right' ? 'translateX(33.333%)' : ''
+                              }`,
+                              width: '300%',
+                              height: '100%'
+                            }}
+                          >
+                            {/* Previous Image */}
+                            <div className="flex-shrink-0" style={{ width: '33.333%', height: '100%' }}>
+                              <img
+                                src={selectedAssets[(currentImageIndex - 1 + selectedAssets.length) % selectedAssets.length]?.url || '/api/placeholder/400/400'}
+                                alt="Previous image"
+                                className="w-full h-full object-cover select-none"
+                                draggable={false}
+                              />
+                            </div>
+                            
+                            {/* Current Image */}
+                            <div className="flex-shrink-0" style={{ width: '33.333%', height: '100%' }}>
+                              <img
+                                src={selectedAssets[currentImageIndex]?.url || '/api/placeholder/400/400'}
+                                alt={selectedAssets[currentImageIndex]?.name || 'Selected asset'}
+                                className="w-full h-full object-cover select-none"
+                                draggable={false}
+                              />
+                            </div>
+                            
+                            {/* Next Image */}
+                            <div className="flex-shrink-0" style={{ width: '33.333%', height: '100%' }}>
+                              <img
+                                src={selectedAssets[(currentImageIndex + 1) % selectedAssets.length]?.url || '/api/placeholder/400/400'}
+                                alt="Next image"
+                                className="w-full h-full object-cover select-none"
+                                draggable={false}
+                              />
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Navigation arrows */}
-                  {selectedAssets.length > 1 && (
+                      )}
+                    </div>
+                  )}
+
+                  {/* Navigation arrows for non-reel carousel */}
+                  {selectedContentType?.id !== 'instagram-reel' && selectedAssets.length > 1 && (
                     <>
                       <button
                         onClick={prevImage}
@@ -738,9 +876,9 @@ export default function GenerateContentPage() {
                       </button>
                     </>
                   )}
-                  
-                  {/* Image indicators */}
-                  {selectedAssets.length > 1 && (
+
+                  {/* Image indicators for non-reel carousel */}
+                  {selectedContentType?.id !== 'instagram-reel' && selectedAssets.length > 1 && (
                     <div className="flex justify-center mt-4 space-x-2">
                       {selectedAssets.map((_, index) => (
                         <button
@@ -756,8 +894,8 @@ export default function GenerateContentPage() {
                 </div>
               </div>
               
-              {/* Caption Editor - Hidden for Instagram Stories */}
-              {selectedContentType?.id !== 'instagram-story' && (
+              {/* Caption Editor - Only for Instagram Posts */}
+              {selectedContentType?.id === 'instagram-post' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Post Caption
@@ -784,14 +922,26 @@ export default function GenerateContentPage() {
                 <h3 className="mt-4 text-lg font-medium text-gray-900">
                   {chatFlow === 'subject' && (selectedContentType?.id === 'instagram-story' ? 'What story would you like to tell?' : 'What subject would you like to focus on?')}
                   {chatFlow === 'agent' && 'Choose an AI agent for photo selection'}
-                  {chatFlow === 'photos' && (selectedContentType?.id === 'instagram-story' ? 'How many photos for your story?' : 'How many photos would you like?')}
+                  {chatFlow === 'photos' && (
+                    selectedContentType?.id === 'instagram-story'
+                      ? 'How many photos for your story?'
+                      : selectedContentType?.id === 'instagram-reel'
+                        ? 'How many video clips would you like?'
+                        : 'How many photos would you like?'
+                  )}
                   {chatFlow === 'generating' && (selectedContentType?.id === 'instagram-story' ? 'Creating your story sequence...' : 'Selecting photos with AI...')}
                   {!['subject', 'agent', 'photos', 'generating'].includes(chatFlow) && `Ready to create ${selectedContentType?.name}`}
                 </h3>
                 <p className="mt-2 text-gray-500">
                   {chatFlow === 'subject' && (selectedContentType?.id === 'instagram-story' ? 'Enter a theme or story concept (e.g., "morning routine", "travel adventure", "food journey", etc.)' : 'Enter a theme or subject for your content (e.g., nature, food, travel, etc.)')}
                   {chatFlow === 'agent' && 'Select an AI agent that matches your content style'}
-                  {chatFlow === 'photos' && (selectedContentType?.id === 'instagram-story' ? 'Choose how many photos for your story (3-7 recommended for best narrative flow)' : 'Choose how many photos to select (1-10)')}
+                  {chatFlow === 'photos' && (
+                    selectedContentType?.id === 'instagram-story'
+                      ? 'Choose how many photos for your story (3-7 recommended for best narrative flow)'
+                      : selectedContentType?.id === 'instagram-reel'
+                        ? 'Choose how many video clips to use (1-5 recommended)'
+                        : 'Choose how many photos to select (1-10)'
+                  )}
                   {chatFlow === 'generating' && (selectedContentType?.id === 'instagram-story' ? 'Please wait while we create your story sequence...' : 'Please wait while we select the best photos for you...')}
                   {!['subject', 'agent', 'photos', 'generating'].includes(chatFlow) && `Chat with the AI to generate content for your ${selectedContentType?.name.toLowerCase()}`}
                 </p>

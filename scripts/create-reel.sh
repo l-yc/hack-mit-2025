@@ -1,0 +1,1 @@
+node scripts/create-reel.js --directory "C:\path\to\videos" --musicPath "C:\path\to\music.mp3" --server "http://localhost:6741" --maxFiles 20 --targetDurationSec 30 --minDurationSec 28 --maxDurationSec 36 --perSegmentSec 3
