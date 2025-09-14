@@ -29,6 +29,7 @@ app = Flask(__name__)
 # Configure CORS
 allowed = [
     "https://hackmit-2025-nine.vercel.app",
+    "http://hackmit-2025-nine.vercel.app",
     "http://localhost:3000",
 ]
 preview_regex = re.compile(r"^https://.*\.vercel\.app$")
