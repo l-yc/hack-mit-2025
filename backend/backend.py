@@ -111,6 +111,60 @@ def _anthropic_request_with_fallbacks(content: str, max_tokens: int, candidates:
     raise Exception(f"Anthropic request failed for {candidates}. Last error: {last_error}")
 
 
+def _build_song_search_urls(title: str, artist: str) -> dict:
+    """Return platform search URLs as fallbacks."""
+    q = f"{title} {artist}".strip() if title or artist else title or artist or ""
+    q_enc = requests.utils.quote(q or "")
+    return {
+        "spotify_search":  f"https://open.spotify.com/search/{q_enc}",
+        "youtube_search":  f"https://www.youtube.com/results?search_query={q_enc}",
+        "apple_search":    f"https://music.apple.com/us/search?term={q_enc}",
+        "soundcloud_search": f"https://soundcloud.com/search?q={q_enc}",
+    }
+
+def resolve_song_links(title: str, artist: str, country: str | None = None) -> dict:
+    """
+    Best-effort: use iTunes Search API (no auth) to fetch a concrete track link,
+    plus platform search fallbacks. Returns:
+    {
+      "best_link": "https://music.apple.com/…",  # or None
+      "apple_track_url": "...",   # may be None
+      "apple_preview_url": "...", # 30s preview if provided
+      "search": { "spotify_search": "...", "youtube_search":"...", ... }
+    }
+    """
+    links = {"best_link": None, "apple_track_url": None, "apple_preview_url": None}
+    links["search"] = _build_song_search_urls(title, artist)
+
+    term = " ".join(x for x in [title, artist] if x).strip()
+    if not term:
+        return links
+
+    try:
+        params = {
+            "term": term,
+            "entity": "song",
+            "limit": 1,
+            "country": (country or os.environ.get("ITUNES_COUNTRY") or "US")
+        }
+        resp = requests.get("https://itunes.apple.com/search", params=params, timeout=10)
+        if resp.ok:
+            data = resp.json()
+            if data.get("resultCount", 0) > 0:
+                r0 = data["results"][0]
+                # Prefer trackViewUrl; fall back to collectionViewUrl
+                apple_url = r0.get("trackViewUrl") or r0.get("collectionViewUrl")
+                preview = r0.get("previewUrl")
+                links["apple_track_url"] = apple_url
+                links["apple_preview_url"] = preview
+                links["best_link"] = apple_url or links["search"]["spotify_search"]
+    except Exception:
+        # Non-fatal; keep fallbacks
+        pass
+
+    return links
+
+
 # --- Single-post caption + song helpers ---------------------------------------
 def generate_post_caption(selected_photos, post_type, selection_context):
     """
@@ -184,7 +238,8 @@ Return a JSON object with fields exactly:
 def get_single_song_recommendation(selected_photos, post_type, selection_context):
     """
     Recommend ONE song that best fits the entire post.
-    Returns a dict with keys like: title, artist, genre, coherence_reason, etc.
+    Returns a dict with keys like: title, artist, genre, coherence_reason, energy_level,
+    mood_keywords, platform_appropriate, licensing_note, link, links.
     """
     prompt = _create_single_song_prompt(selected_photos, post_type, selection_context)
     try:
@@ -195,30 +250,77 @@ def get_single_song_recommendation(selected_photos, post_type, selection_context
         )
         text = result["content"][0]["text"]
 
-        # Expect a single JSON object; fallback to parse
         try:
             start = text.find("{")
             end = text.rfind("}") + 1
             obj = json.loads(text[start:end]) if start != -1 and end > start else json.loads(text)
-            # minimal normalization
+
+            title  = (obj.get("title") or "").strip()
+            artist = (obj.get("artist") or "").strip()
+
+            # If the model already provided a link, keep it; otherwise resolve one.
+            model_link = (obj.get("link") or "").strip()
+            resolved = resolve_song_links(title, artist)
+
+            link = model_link or resolved.get("best_link") or resolved["search"]["spotify_search"]
+
             return {
-                "title": obj.get("title") or "",
-                "artist": obj.get("artist") or "",
+                "title": title,
+                "artist": artist,
                 "genre": obj.get("genre") or "",
                 "coherence_reason": obj.get("coherence_reason") or obj.get("reason") or "",
                 "energy_level": obj.get("energy_level") or obj.get("energy") or "",
                 "mood_keywords": obj.get("mood_keywords") or obj.get("mood") or [],
                 "platform_appropriate": obj.get("platform_appropriate", True),
                 "licensing_note": obj.get("licensing_note") or "",
-                "link": obj.get("link") or "",
+                "link": link,
+                "links": {
+                    "apple_track_url": resolved.get("apple_track_url"),
+                    "apple_preview_url": resolved.get("apple_preview_url"),
+                    **resolved.get("search", {}),
+                },
             }
         except Exception:
-            # very simple heuristic fallback
+            # Heuristic fallback
             lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-            guess = {"title": "", "artist": "", "genre": "", "coherence_reason": lines[0] if lines else ""}
-            return guess
+            guess_title = ""
+            guess_artist = ""
+            if lines:
+                # Very rough extraction: "Title — Artist" or "Title - Artist"
+                parts = re.split(r"\s+[—-]\s+", lines[0], maxsplit=1)
+                if len(parts) == 2:
+                    guess_title, guess_artist = parts[0], parts[1]
+            resolved = resolve_song_links(guess_title, guess_artist)
+            return {
+                "title": guess_title,
+                "artist": guess_artist,
+                "genre": "",
+                "coherence_reason": lines[0] if lines else "",
+                "energy_level": "",
+                "mood_keywords": [],
+                "platform_appropriate": True,
+                "licensing_note": "",
+                "link": resolved.get("best_link") or resolved["search"]["spotify_search"],
+                "links": {
+                    "apple_track_url": resolved.get("apple_track_url"),
+                    "apple_preview_url": resolved.get("apple_preview_url"),
+                    **resolved.get("search", {}),
+                },
+            }
     except Exception as e:
-        return {"title": "", "artist": "", "genre": "", "coherence_reason": "", "error": str(e)}
+        return {
+            "title": "",
+            "artist": "",
+            "genre": "",
+            "coherence_reason": "",
+            "energy_level": "",
+            "mood_keywords": [],
+            "platform_appropriate": True,
+            "licensing_note": "",
+            "link": "",
+            "links": _build_song_search_urls("", ""),
+            "error": str(e),
+        }
 
 
 def _create_single_song_prompt(selected_photos, post_type, selection_context):
