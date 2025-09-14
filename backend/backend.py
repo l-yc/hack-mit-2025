@@ -35,8 +35,7 @@ allowed = [
 preview_regex = re.compile(r"^https://.*\.vercel\.app$")
 CORS(
     app,
-    origins=allowed,
-    vary_header=True
+    origins="*"
 )
 
 
