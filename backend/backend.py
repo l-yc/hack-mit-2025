@@ -18,7 +18,7 @@ from werkzeug.utils import secure_filename
 
 from PIL import Image
 
-from .image_editor import cleanup_image
+from backend.image_editor import cleanup_image
 
 try:
     # Load .env if present
