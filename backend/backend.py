@@ -63,6 +63,54 @@ os.makedirs(os.path.join(UPLOAD_FOLDER, "cleaned"), exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_FOLDER, "edited"), exist_ok=True)
 
 
+import json  # make sure this is imported
+# ...
+
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+
+DEFAULT_MODEL_CANDIDATES = {
+    "rater":    ["claude-3-5-haiku-latest", "claude-3-haiku-20240307", "claude-3-5-sonnet-latest"],
+    "captions": ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-haiku-20240307"],
+    "songs":    ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-haiku-20240307"],
+}
+
+def _model_candidates(kind: str) -> list[str]:
+    env_key = {"rater":"CLAUDE_MODEL_RATER", "captions":"CLAUDE_MODEL_CAPTIONS", "songs":"CLAUDE_MODEL_SONGS"}[kind]
+    override = os.environ.get(env_key)
+    if override:
+        return [m.strip() for m in override.split(",") if m.strip()]
+    return DEFAULT_MODEL_CANDIDATES[kind][:]
+
+def _anthropic_request_with_fallbacks(content: str, max_tokens: int, candidates: list[str]) -> dict:
+    if not os.environ.get("CLAUDE_API_KEY"):
+        raise Exception("CLAUDE_API_KEY not set")
+    headers = {
+        "x-api-key": os.environ["CLAUDE_API_KEY"],
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+    }
+    last_error = None
+    for model in candidates:
+        try:
+            payload = {"model": model, "messages": [{"role":"user","content":content}], "max_tokens": max_tokens}
+            resp = requests.post(ANTHROPIC_API_URL, headers=headers, json=payload, timeout=45)
+            if resp.status_code == 200:
+                return resp.json()
+            # try to detect “model not found” and fall through to the next
+            try:
+                err = resp.json()
+            except Exception:
+                err = {"text": resp.text}
+            if resp.status_code == 404 and "not_found_error" in json.dumps(err):
+                last_error = f"404 {err}"
+                continue
+            resp.raise_for_status()
+        except Exception as e:
+            last_error = str(e)
+            continue
+    raise Exception(f"Anthropic request failed for {candidates}. Last error: {last_error}")
+
+
 # --- Single-post caption + song helpers ---------------------------------------
 def generate_post_caption(selected_photos, post_type, selection_context):
     """
