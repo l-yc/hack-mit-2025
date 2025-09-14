@@ -158,7 +158,7 @@ export class FlaskAssetService extends AssetService {
         uploadedAssets.push({
           id: data.filename,
           name: vf.name,
-          url: `${this.baseUrl}${data.video_url}`,
+          url: `${this.baseUrl}/videos/${data.filename}`,
           type: vf.type || 'video/mp4',
           size: vf.size,
           tags: [],
@@ -183,16 +183,17 @@ export class FlaskAssetService extends AssetService {
 
     const result = await response.json();
     
-    // Convert Flask files to Asset format; infer type by extension
+    // Convert Flask files to Asset format; infer type by extension and choose the correct route
     let assets: Asset[] = result.photos.map((file: any) => {
       const name: string = file.filename || '';
       const ext = name.split('.').pop()?.toLowerCase() || '';
       const isVideo = ['mp4', 'mov', 'm4v', 'webm'].includes(ext);
       const type = isVideo ? 'video/mp4' : (['png','gif','webp','jpeg','jpg'].includes(ext) ? `image/${ext === 'jpg' ? 'jpeg' : ext}` : 'application/octet-stream');
+      const href = `${this.baseUrl}${isVideo ? '/videos/' : '/photos/'}${file.filename}`;
       return {
         id: file.filename,
         name: file.filename,
-        url: `${this.baseUrl}${file.file_url}`,
+        url: href,
         type,
         size: file.size_bytes,
         tags: [],

@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -748,10 +748,29 @@ def get_photo(filename):
 
 @app.route("/videos/<path:filename>", methods=["GET"])
 def get_video(filename):
-    """Serve uploaded videos (mp4/mov/m4v)"""
+    """Serve uploaded videos (mp4/mov/m4v) with explicit Content-Type and range support"""
     try:
-        # Reuse uploads folder; Flask will set proper mimetype by extension
-        return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+        import mimetypes
+        file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+
+        if not os.path.exists(file_path):
+            return jsonify({"error": "Video not found"}), 404
+
+        ext = os.path.splitext(filename)[1].lower().lstrip(".")
+        # Common and reliable types for browsers
+        mime_by_ext = {
+            "mp4": "video/mp4",
+            "m4v": "video/mp4",
+            "mov": "video/quicktime",
+            "webm": "video/webm",
+        }
+        content_type = mime_by_ext.get(ext) or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+        resp = send_file(file_path, mimetype=content_type, conditional=True)
+        # Ensure headers are explicitly set for streaming
+        resp.headers["Content-Type"] = content_type
+        resp.headers["Accept-Ranges"] = "bytes"
+        return resp
     except FileNotFoundError:
         return jsonify({"error": "Video not found"}), 404
 
