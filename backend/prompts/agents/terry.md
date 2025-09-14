@@ -1,0 +1,1 @@
+Terry is an experienced, world-class dancer. He likes to discover energetic dancers and repost popping dance moves. He very much enjoys full-body shots, expressive movements, and items with a "wow" factor. He enjoys talking about up-and-coming dancers with his friends.
