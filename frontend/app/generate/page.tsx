@@ -150,14 +150,29 @@ export default function GenerateContentPage() {
 
   const handleContinue = () => {
     if (selectedAgents.length > 0) {
+      // Add user message showing the selected agents
       const agentNames = selectedAgents.map(a => a.name.replace('.md', '')).join(', ');
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        type: 'user',
+        content: agentNames,
+        timestamp: new Date(),
+      };
+      
+      // Different messaging for Stories vs Posts
+      const continueMessage = selectedContentType?.id === 'instagram-story'
+        ? `Excellent! You've selected ${agentNames} for your story. For Instagram Stories, I recommend 3-7 photos to create a compelling narrative sequence. How many photos would you like? (3-7 recommended)`
+        : `Perfect! You've selected ${agentNames}. Now, how many photos would you like me to select? (1-10)`;
+      
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: `Perfect! You've selected ${agentNames}. Now, how many photos would you like me to select? (1-10)`,
+        content: continueMessage,
         timestamp: new Date(),
       };
-      setMessages([...messages, aiResponse]);
+      
+      // Add both user and AI messages
+      setMessages([...messages, userMessage, aiResponse]);
       setChatFlow('photos');
     }
   };
@@ -172,7 +187,10 @@ export default function GenerateContentPage() {
       timestamp: new Date(),
     };
 
-    setMessages([...messages, userMessage]);
+    // Create updated messages array with user message
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
+    
     const currentInput = inputMessage;
     setInputMessage('');
     setIsGenerating(true);
@@ -189,24 +207,46 @@ export default function GenerateContentPage() {
 
     if (chatFlow === 'subject') {
       setSubject(currentInput);
-      aiResponse = {
-        id: (Date.now() + 1).toString(),
-        type: 'assistant',
-        content: 'Great! Now, which AI agent would you like to use for photo selection? Choose from the available agents below:',
-        timestamp: new Date(),
-      };
+      
+      // Different flows based on content type
+      if (selectedContentType?.id === 'instagram-story') {
+        aiResponse = {
+          id: (Date.now() + 1).toString(),
+          type: 'assistant',
+          content: `Perfect! Creating a story about "${currentInput}". For Instagram Stories, we'll create a sequence that tells a compelling narrative. Which AI agent would you like to use for photo selection?`,
+          timestamp: new Date(),
+        };
+      } else {
+        aiResponse = {
+          id: (Date.now() + 1).toString(),
+          type: 'assistant',
+          content: 'Great! Now, which AI agent would you like to use for photo selection? Choose from the available agents below:',
+          timestamp: new Date(),
+        };
+      }
       setChatFlow('agent');
     } else if (chatFlow === 'agent') {
       // Check if user wants to continue
       if (currentInput.toLowerCase().includes('continue') || currentInput.toLowerCase().includes('done')) {
         if (selectedAgents.length > 0) {
           const agentNames = selectedAgents.map(a => a.name.replace('.md', '')).join(', ');
-          aiResponse = {
-            id: (Date.now() + 1).toString(),
-            type: 'assistant',
-            content: `Perfect! You've selected ${agentNames}. Now, how many photos would you like me to select? (1-10)`,
-            timestamp: new Date(),
-          };
+          
+          // Different messaging for Stories vs Posts
+          if (selectedContentType?.id === 'instagram-story') {
+            aiResponse = {
+              id: (Date.now() + 1).toString(),
+              type: 'assistant',
+              content: `Excellent! You've selected ${agentNames} for your story. For Instagram Stories, I recommend 3-7 photos to create a compelling narrative sequence. How many photos would you like? (3-7 recommended)`,
+              timestamp: new Date(),
+            };
+          } else {
+            aiResponse = {
+              id: (Date.now() + 1).toString(),
+              type: 'assistant',
+              content: `Perfect! You've selected ${agentNames}. Now, how many photos would you like me to select? (1-10)`,
+              timestamp: new Date(),
+            };
+          }
           setChatFlow('photos');
         } else {
           aiResponse = {
@@ -255,7 +295,13 @@ export default function GenerateContentPage() {
       }
     } else if (chatFlow === 'photos') {
       const photoCount = parseInt(currentInput);
-      if (photoCount >= 1 && photoCount <= 10) {
+      
+      // Different validation for Stories vs Posts
+      const isValidCount = selectedContentType?.id === 'instagram-story' 
+        ? (photoCount >= 1 && photoCount <= 10) // Stories can have 1-10 photos
+        : (photoCount >= 1 && photoCount <= 10);
+      
+      if (isValidCount) {
         setNumPhotos(photoCount);
         setChatFlow('generating');
         
@@ -290,11 +336,32 @@ export default function GenerateContentPage() {
             
             setSelectedAssets(selectedPhotos);
             
+            // Generate caption from API response captions
+            let generatedCaption = '';
+            if (data.captions && Object.keys(data.captions).length > 0) {
+              // Combine captions from the API response
+              const captionTexts = Object.values(data.captions).map((caption: any) => caption.text).filter(Boolean);
+              if (captionTexts.length > 0) {
+                generatedCaption = captionTexts.join('\n\n');
+              }
+            }
+            
+            // Set the generated caption
+            if (generatedCaption) {
+              setPostCaption(generatedCaption);
+            }
+            
             const agentNames = selectedAgents.map(a => a.name.replace('.md', '')).join(', ');
+            
+            // Different success messages for Stories vs Posts
+            const successMessage = selectedContentType?.id === 'instagram-story'
+              ? `Perfect! I've created a ${selectedPhotos.length}-photo story sequence about "${subject}" using ${agentNames}. The photos are arranged to tell a compelling narrative - perfect for your Instagram Story! I've also generated captions for each photo.`
+              : `Excellent! I've selected ${selectedPhotos.length} photos using ${agentNames} for your ${subject} content. I've also generated captions for you - you can see them in the caption field above and edit as needed.`;
+            
             aiResponse = {
               id: (Date.now() + 1).toString(),
               type: 'assistant',
-              content: `Excellent! I've selected ${selectedPhotos.length} photos using ${agentNames} for your ${subject} content. You can see them in the carousel above and edit the caption as needed.`,
+              content: successMessage,
               timestamp: new Date(),
             };
             setChatFlow('complete');
@@ -318,16 +385,22 @@ export default function GenerateContentPage() {
           setChatFlow('photos');
         }
       } else {
+        // Different error messages for Stories vs Posts
+        const errorMessage = selectedContentType?.id === 'instagram-story'
+          ? 'Please enter a number between 1 and 10. For Stories, I recommend 3-7 photos for the best narrative flow.'
+          : 'Please enter a number between 1 and 10 for the number of photos.';
+          
         aiResponse = {
           id: (Date.now() + 1).toString(),
           type: 'assistant',
-          content: 'Please enter a number between 1 and 10 for the number of photos.',
+          content: errorMessage,
           timestamp: new Date(),
         };
       }
     }
 
-    setMessages([...messages, aiResponse]);
+    // Add AI response to the updated messages (which includes the user message)
+    setMessages([...updatedMessages, aiResponse]);
     setIsGenerating(false);
   };
 
@@ -523,7 +596,7 @@ export default function GenerateContentPage() {
               <div className="bg-gray-50 rounded-lg p-6">
                 <div className="relative">
                   <div 
-                    className="aspect-square bg-white rounded-lg overflow-hidden border border-gray-200 max-w-md mx-auto cursor-grab active:cursor-grabbing"
+                    className={`${selectedContentType?.id === 'instagram-story' ? 'aspect-[9/16] max-w-xs' : 'aspect-square max-w-md'} bg-white rounded-lg overflow-hidden border border-gray-200 mx-auto cursor-grab active:cursor-grabbing`}
                     onMouseDown={handleDragStart}
                     onMouseMove={handleDragMove}
                     onMouseUp={handleDragEnd}
@@ -621,22 +694,24 @@ export default function GenerateContentPage() {
                 </div>
               </div>
               
-              {/* Caption Editor */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Post Caption
-                </label>
-                <textarea
-                  value={postCaption}
-                  onChange={(e) => setPostCaption(e.target.value)}
-                  className="w-full h-32 p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none text-gray-900 placeholder-gray-500"
-                  placeholder="Write your caption here..."
-                  style={{ color: '#1f2937' }}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  {postCaption.length} characters
-                </p>
-              </div>
+              {/* Caption Editor - Hidden for Instagram Stories */}
+              {selectedContentType?.id !== 'instagram-story' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Post Caption
+                  </label>
+                  <textarea
+                    value={postCaption}
+                    onChange={(e) => setPostCaption(e.target.value)}
+                    className="w-full h-32 p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none text-gray-900 placeholder-gray-500"
+                    placeholder="Write your caption here..."
+                    style={{ color: '#1f2937' }}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {postCaption.length} characters
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex items-center justify-center h-full text-center">
@@ -645,17 +720,17 @@ export default function GenerateContentPage() {
                   <span className="text-2xl">{selectedContentType?.icon as any}</span>
                 </div>
                 <h3 className="mt-4 text-lg font-medium text-gray-900">
-                  {chatFlow === 'subject' && 'What subject would you like to focus on?'}
+                  {chatFlow === 'subject' && (selectedContentType?.id === 'instagram-story' ? 'What story would you like to tell?' : 'What subject would you like to focus on?')}
                   {chatFlow === 'agent' && 'Choose an AI agent for photo selection'}
-                  {chatFlow === 'photos' && 'How many photos would you like?'}
-                  {chatFlow === 'generating' && 'Selecting photos with AI...'}
+                  {chatFlow === 'photos' && (selectedContentType?.id === 'instagram-story' ? 'How many photos for your story?' : 'How many photos would you like?')}
+                  {chatFlow === 'generating' && (selectedContentType?.id === 'instagram-story' ? 'Creating your story sequence...' : 'Selecting photos with AI...')}
                   {!['subject', 'agent', 'photos', 'generating'].includes(chatFlow) && `Ready to create ${selectedContentType?.name}`}
                 </h3>
                 <p className="mt-2 text-gray-500">
-                  {chatFlow === 'subject' && 'Enter a theme or subject for your content (e.g., nature, food, travel, etc.)'}
+                  {chatFlow === 'subject' && (selectedContentType?.id === 'instagram-story' ? 'Enter a theme or story concept (e.g., "morning routine", "travel adventure", "food journey", etc.)' : 'Enter a theme or subject for your content (e.g., nature, food, travel, etc.)')}
                   {chatFlow === 'agent' && 'Select an AI agent that matches your content style'}
-                  {chatFlow === 'photos' && 'Choose how many photos to select (1-10)'}
-                  {chatFlow === 'generating' && 'Please wait while we select the best photos for you...'}
+                  {chatFlow === 'photos' && (selectedContentType?.id === 'instagram-story' ? 'Choose how many photos for your story (3-7 recommended for best narrative flow)' : 'Choose how many photos to select (1-10)')}
+                  {chatFlow === 'generating' && (selectedContentType?.id === 'instagram-story' ? 'Please wait while we create your story sequence...' : 'Please wait while we select the best photos for you...')}
                   {!['subject', 'agent', 'photos', 'generating'].includes(chatFlow) && `Chat with the AI to generate content for your ${selectedContentType?.name.toLowerCase()}`}
                 </p>
               </div>
@@ -764,7 +839,7 @@ export default function GenerateContentPage() {
                   <div className="flex justify-center">
                     <button
                       onClick={handleContinue}
-                      className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors text-sm font-medium"
+                      className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors text-sm font-medium hover:cursor-pointer"
                     >
                       Continue with {selectedAgents.length} agent{selectedAgents.length > 1 ? 's' : ''}
                     </button>
@@ -801,11 +876,11 @@ export default function GenerateContentPage() {
                 onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                 placeholder={
                   chatFlow === 'subject' 
-                    ? 'Enter the subject or theme...' 
+                    ? (selectedContentType?.id === 'instagram-story' ? 'Enter your story concept...' : 'Enter the subject or theme...')
                     : chatFlow === 'agent'
                     ? 'Type "continue" when ready...'
                     : chatFlow === 'photos'
-                    ? 'Enter number of photos (1-10)...'
+                    ? (selectedContentType?.id === 'instagram-story' ? 'Enter number of photos (3-7 recommended)...' : 'Enter number of photos (1-10)...')
                     : 'Describe the content you want to generate...'
                 }
                 className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-sm text-gray-900 placeholder-gray-500"
