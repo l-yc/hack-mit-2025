@@ -13,6 +13,14 @@ type Message = {
   assets?: Asset[];
 };
 
+type Agent = {
+  name: string;
+  path: string;
+  description: string;
+};
+
+type ChatFlow = 'subject' | 'agent' | 'photos' | 'generating' | 'complete';
+
 type ContentType = {
   id: string;
   name: string;
@@ -59,22 +67,21 @@ export default function GenerateContentPage() {
     setSelectedContentType,
     messages,
     setMessages,
-    chatFlow,
-    setChatFlow,
     selectedAssets,
     setSelectedAssets,
     postCaption,
     setPostCaption,
-    userPurpose,
-    setUserPurpose,
-    userTarget,
-    setUserTarget,
-    selectedProject,
-    setSelectedProject,
     currentImageIndex,
     setCurrentImageIndex,
     assets
   } = useAppContext();
+
+  // New state for the parameter collection flow
+  const [chatFlow, setChatFlow] = useState<ChatFlow>('subject');
+  const [subject, setSubject] = useState<string>('');
+  const [selectedAgents, setSelectedAgents] = useState<Agent[]>([]);
+  const [numPhotos, setNumPhotos] = useState<number>(3);
+  const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
 
   const [showContentTypes, setShowContentTypes] = useState(!selectedContentType);
   const [inputMessage, setInputMessage] = useState('');
@@ -91,6 +98,19 @@ export default function GenerateContentPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Fetch available agents
+  const fetchAgents = async () => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741'}/agents`);
+      const data = await response.json();
+      if (data.agents) {
+        setAvailableAgents(data.agents);
+      }
+    } catch (error) {
+      console.error('Error fetching agents:', error);
+    }
+  };
 
   // Load assets from API on component mount
   useEffect(() => {
@@ -114,7 +134,33 @@ export default function GenerateContentPage() {
     };
 
     fetchAssets();
+    fetchAgents();
   }, []);
+
+  const handleAgentClick = (agent: Agent) => {
+    setSelectedAgents(prev => {
+      const exists = prev.find(a => a.name === agent.name);
+      if (exists) {
+        return prev.filter(a => a.name !== agent.name);
+      } else {
+        return [...prev, agent];
+      }
+    });
+  };
+
+  const handleContinue = () => {
+    if (selectedAgents.length > 0) {
+      const agentNames = selectedAgents.map(a => a.name.replace('.md', '')).join(', ');
+      const aiResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        type: 'assistant',
+        content: `Perfect! You've selected ${agentNames}. Now, how many photos would you like me to select? (1-10)`,
+        timestamp: new Date(),
+      };
+      setMessages([...messages, aiResponse]);
+      setChatFlow('photos');
+    }
+  };
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
@@ -126,7 +172,7 @@ export default function GenerateContentPage() {
       timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    setMessages([...messages, userMessage]);
     const currentInput = inputMessage;
     setInputMessage('');
     setIsGenerating(true);
@@ -134,46 +180,154 @@ export default function GenerateContentPage() {
     // Simulate AI response based on chat flow
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    let aiResponse: Message;
+    let aiResponse: Message = {
+      id: (Date.now() + 1).toString(),
+      type: 'assistant',
+      content: 'I understand. Please try again.',
+      timestamp: new Date(),
+    };
 
-    if (chatFlow === 'purpose') {
-      setUserPurpose(currentInput);
+    if (chatFlow === 'subject') {
+      setSubject(currentInput);
       aiResponse = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: 'Great! Now, who is your target audience for this Instagram post? (e.g., young professionals, fitness enthusiasts, food lovers, etc.)',
+        content: 'Great! Now, which AI agent would you like to use for photo selection? Choose from the available agents below:',
         timestamp: new Date(),
       };
-      setChatFlow('project');
-    } else if (chatFlow === 'project') {
-      setUserTarget(currentInput);
-      aiResponse = {
-        id: (Date.now() + 1).toString(),
-        type: 'assistant',
-        content: 'Perfect! What project or theme should I choose assets from? (e.g., vacation photos, product shots, lifestyle content, etc.)',
-        timestamp: new Date(),
-      };
-      setChatFlow('generating');
-    } else {
-      setSelectedProject(currentInput);
-      setChatFlow('complete');
-      
-      // Auto-select relevant assets and generate content
-      const relevantAssets = availableAssets.slice(0, 3); // Mock selection
-      setSelectedAssets(relevantAssets);
-      
-      const generatedCaption = `✨ ${userPurpose}\n\nPerfect for ${userTarget} who love authentic moments! This ${selectedProject} content really captures the essence of what we're all about.\n\n#${selectedProject.replace(/\s+/g, '').toLowerCase()} #authentic #lifestyle #inspiration`;
-      setPostCaption(generatedCaption);
-      
-      aiResponse = {
-        id: (Date.now() + 1).toString(),
-        type: 'assistant',
-        content: `Perfect! I've selected ${relevantAssets.length} assets from your ${selectedProject} and created a draft post. You can see the preview in the center pane and edit the caption as needed.`,
-        timestamp: new Date(),
-      };
+      setChatFlow('agent');
+    } else if (chatFlow === 'agent') {
+      // Check if user wants to continue
+      if (currentInput.toLowerCase().includes('continue') || currentInput.toLowerCase().includes('done')) {
+        if (selectedAgents.length > 0) {
+          const agentNames = selectedAgents.map(a => a.name.replace('.md', '')).join(', ');
+          aiResponse = {
+            id: (Date.now() + 1).toString(),
+            type: 'assistant',
+            content: `Perfect! You've selected ${agentNames}. Now, how many photos would you like me to select? (1-10)`,
+            timestamp: new Date(),
+          };
+          setChatFlow('photos');
+        } else {
+          aiResponse = {
+            id: (Date.now() + 1).toString(),
+            type: 'assistant',
+            content: 'Please select at least one agent before continuing.',
+            timestamp: new Date(),
+          };
+        }
+      } else {
+        // Try to find and toggle agent selection
+        const agent = availableAgents.find(a => 
+          a.name.toLowerCase().includes(currentInput.toLowerCase()) ||
+          a.name.replace('.md', '').toLowerCase().includes(currentInput.toLowerCase())
+        );
+        
+        if (agent) {
+          // Toggle agent selection
+          setSelectedAgents(prev => {
+            const exists = prev.find(a => a.name === agent.name);
+            if (exists) {
+              return prev.filter(a => a.name !== agent.name);
+            } else {
+              return [...prev, agent];
+            }
+          });
+          
+          const isSelected = selectedAgents.some(a => a.name === agent.name);
+          const action = isSelected ? 'removed' : 'added';
+          const currentCount = selectedAgents.length + (isSelected ? -1 : 1);
+          
+          aiResponse = {
+            id: (Date.now() + 1).toString(),
+            type: 'assistant',
+            content: `Great! I've ${action} ${agent.name.replace('.md', '')} ${isSelected ? 'from' : 'to'} your selection. You now have ${currentCount} agent${currentCount !== 1 ? 's' : ''} selected. Type "continue" when you're ready to proceed.`,
+            timestamp: new Date(),
+          };
+        } else {
+          aiResponse = {
+            id: (Date.now() + 1).toString(),
+            type: 'assistant',
+            content: 'Please select agents by clicking on them above, or type "continue" when you\'re ready to proceed.',
+            timestamp: new Date(),
+          };
+        }
+      }
+    } else if (chatFlow === 'photos') {
+      const photoCount = parseInt(currentInput);
+      if (photoCount >= 1 && photoCount <= 10) {
+        setNumPhotos(photoCount);
+        setChatFlow('generating');
+        
+        // Call the /select API to get photos
+        try {
+          const response = await fetch(`${process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741'}/select`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              n: photoCount,
+              post_type: `${selectedContentType?.name || 'Post'} about ${subject}`,
+              agents: selectedAgents.map(agent => agent.path)
+            }),
+          });
+
+          const data = await response.json();
+          
+          if (data.selected_photos && data.selected_photos.length > 0) {
+            // Convert selected photos to Asset format
+            const selectedPhotos = data.selected_photos.map((photo: any) => ({
+              id: photo.filename,
+              name: photo.filename,
+              url: `${process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741'}/photos/${photo.filename}`,
+              type: 'image/jpeg',
+              size: photo.size_bytes,
+              tags: [],
+              metadata: {},
+              created_at: photo.modified_time,
+            }));
+            
+            setSelectedAssets(selectedPhotos);
+            
+            const agentNames = selectedAgents.map(a => a.name.replace('.md', '')).join(', ');
+            aiResponse = {
+              id: (Date.now() + 1).toString(),
+              type: 'assistant',
+              content: `Excellent! I've selected ${selectedPhotos.length} photos using ${agentNames} for your ${subject} content. You can see them in the carousel above and edit the caption as needed.`,
+              timestamp: new Date(),
+            };
+            setChatFlow('complete');
+          } else {
+            aiResponse = {
+              id: (Date.now() + 1).toString(),
+              type: 'assistant',
+              content: 'Sorry, I couldn\'t find any suitable photos. Please try again or check if there are photos in the directory.',
+              timestamp: new Date(),
+            };
+            setChatFlow('photos');
+          }
+        } catch (error) {
+          console.error('Error calling /select API:', error);
+          aiResponse = {
+            id: (Date.now() + 1).toString(),
+            type: 'assistant',
+            content: 'Sorry, there was an error selecting photos. Please try again.',
+            timestamp: new Date(),
+          };
+          setChatFlow('photos');
+        }
+      } else {
+        aiResponse = {
+          id: (Date.now() + 1).toString(),
+          type: 'assistant',
+          content: 'Please enter a number between 1 and 10 for the number of photos.',
+          timestamp: new Date(),
+        };
+      }
     }
 
-    setMessages(prev => [...prev, aiResponse]);
+    setMessages([...messages, aiResponse]);
     setIsGenerating(false);
   };
 
@@ -188,21 +342,19 @@ export default function GenerateContentPage() {
   };
 
   const toggleAssetSelection = (asset: Asset) => {
-    setSelectedAssets(prev => {
-      const exists = prev.find(a => a.id === asset.id);
-      if (exists) {
-        return prev.filter(a => a.id !== asset.id);
-      } else {
-        return [...prev, asset];
-      }
-    });
+    const exists = selectedAssets.find(a => a.id === asset.id);
+    if (exists) {
+      setSelectedAssets(selectedAssets.filter(a => a.id !== asset.id));
+    } else {
+      setSelectedAssets([...selectedAssets, asset]);
+    }
   };
 
   const downloadContent = () => {
-    if (!editableContent) return;
+    if (!postCaption) return;
     
     const element = document.createElement('a');
-    const file = new Blob([editableContent], { type: 'text/plain' });
+    const file = new Blob([postCaption], { type: 'text/plain' });
     element.href = URL.createObjectURL(file);
     element.download = `${selectedContentType?.name || 'content'}.txt`;
     document.body.appendChild(element);
@@ -216,14 +368,14 @@ export default function GenerateContentPage() {
   };
 
   const initializeChatFlow = (contentType: ContentType) => {
-    setSelectedContentType(contentType);
+    setSelectedContentType(contentType as any);
     setShowContentTypes(false);
-    setChatFlow('purpose');
+    setChatFlow('subject');
     setMessages([
       {
         id: '1',
         type: 'assistant',
-        content: `Great choice! Let's create an amazing ${contentType.name}. First, what's the main purpose or message of this post? (e.g., promote a product, share an experience, inspire your audience, etc.)`,
+        content: `Great choice! Let's create an amazing ${contentType.name}. First, what subject or theme would you like to focus on? (e.g., nature, food, travel, fashion, etc.)`,
         timestamp: new Date(),
       }
     ]);
@@ -239,7 +391,7 @@ export default function GenerateContentPage() {
     setIsSliding(true);
     setSlideDirection('left');
     setTimeout(() => {
-      setCurrentImageIndex((prev) => (prev + 1) % selectedAssets.length);
+      setCurrentImageIndex((currentImageIndex + 1) % selectedAssets.length);
       setSlideDirection(null);
       setIsSliding(false);
     }, 300);
@@ -250,7 +402,7 @@ export default function GenerateContentPage() {
     setIsSliding(true);
     setSlideDirection('right');
     setTimeout(() => {
-      setCurrentImageIndex((prev) => (prev - 1 + selectedAssets.length) % selectedAssets.length);
+      setCurrentImageIndex((currentImageIndex - 1 + selectedAssets.length) % selectedAssets.length);
       setSlideDirection(null);
       setIsSliding(false);
     }, 300);
@@ -308,7 +460,10 @@ export default function GenerateContentPage() {
                     setMessages([]);
                     setPostCaption('');
                     setSelectedAssets([]);
-                    setChatFlow('purpose');
+                    setChatFlow('subject');
+                    setSubject('');
+                    setSelectedAgents([]);
+                    setNumPhotos(3);
                   }}
                   className="px-4 py-2 text-sm text-purple-600 hover:text-purple-700 border border-purple-300 rounded-lg hover:bg-purple-50 cursor-pointer"
                 >
@@ -361,7 +516,7 @@ export default function GenerateContentPage() {
                 ))}
               </div>
             </div>
-          ) : chatFlow === 'complete' && selectedAssets.length > 0 ? (
+          ) : (chatFlow === 'complete' || chatFlow === 'generating') && selectedAssets.length > 0 ? (
             <div className="space-y-6">
 
               {/* Image Carousel */}
@@ -487,11 +642,21 @@ export default function GenerateContentPage() {
             <div className="flex items-center justify-center h-full text-center">
               <div>
                 <div className="mx-auto h-12 w-12 rounded-full bg-purple-100 flex items-center justify-center">
-                  <span className="text-2xl">{selectedContentType?.icon}</span>
+                  <span className="text-2xl">{selectedContentType?.icon as any}</span>
                 </div>
-                <h3 className="mt-4 text-lg font-medium text-gray-900">Ready to create {selectedContentType?.name}</h3>
+                <h3 className="mt-4 text-lg font-medium text-gray-900">
+                  {chatFlow === 'subject' && 'What subject would you like to focus on?'}
+                  {chatFlow === 'agent' && 'Choose an AI agent for photo selection'}
+                  {chatFlow === 'photos' && 'How many photos would you like?'}
+                  {chatFlow === 'generating' && 'Selecting photos with AI...'}
+                  {!['subject', 'agent', 'photos', 'generating'].includes(chatFlow) && `Ready to create ${selectedContentType?.name}`}
+                </h3>
                 <p className="mt-2 text-gray-500">
-                  Chat with the AI to generate content for your {selectedContentType?.name.toLowerCase()}
+                  {chatFlow === 'subject' && 'Enter a theme or subject for your content (e.g., nature, food, travel, etc.)'}
+                  {chatFlow === 'agent' && 'Select an AI agent that matches your content style'}
+                  {chatFlow === 'photos' && 'Choose how many photos to select (1-10)'}
+                  {chatFlow === 'generating' && 'Please wait while we select the best photos for you...'}
+                  {!['subject', 'agent', 'photos', 'generating'].includes(chatFlow) && `Chat with the AI to generate content for your ${selectedContentType?.name.toLowerCase()}`}
                 </p>
               </div>
             </div>
@@ -538,6 +703,80 @@ export default function GenerateContentPage() {
                 </div>
               </div>
             ))}
+
+            {/* Agent Selection UI */}
+            {chatFlow === 'agent' && availableAgents.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-gray-600">Choose AI agents (click to select multiple):</p>
+                  {selectedAgents.length > 0 && (
+                    <span className="text-xs text-purple-600 font-medium">
+                      {selectedAgents.length} selected
+                    </span>
+                  )}
+                </div>
+                <div className="flex space-x-3 overflow-x-auto pb-2">
+                  {availableAgents.map((agent) => {
+                    const isSelected = selectedAgents.some(a => a.name === agent.name);
+                    return (
+                      <button
+                        key={agent.name}
+                        onClick={() => handleAgentClick(agent)}
+                        className={`flex-shrink-0 w-32 p-3 border rounded-lg transition-colors text-center cursor-pointer ${
+                          isSelected 
+                            ? 'bg-purple-100 border-purple-300' 
+                            : 'bg-white border-gray-200 hover:border-purple-300 hover:bg-purple-50'
+                        }`}
+                      >
+                        <div className={`w-12 h-12 mx-auto mb-2 rounded-full flex items-center justify-center ${
+                          isSelected 
+                            ? 'bg-gradient-to-br from-purple-500 to-purple-600' 
+                            : 'bg-gradient-to-br from-purple-100 to-purple-200'
+                        }`}>
+                          <span className={`text-lg font-bold ${
+                            isSelected ? 'text-white' : 'text-purple-600'
+                          }`}>
+                            {agent.name.replace('.md', '').charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <div className={`font-medium text-sm mb-1 ${
+                          isSelected ? 'text-purple-900' : 'text-gray-900'
+                        }`}>
+                          {agent.name.replace('.md', '')}
+                        </div>
+                        <div className="text-xs text-gray-600 overflow-hidden" style={{
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical'
+                        }}>
+                          {agent.description}
+                        </div>
+                        {isSelected && (
+                          <div className="mt-1 text-xs text-purple-600 font-medium">
+                            ✓ Selected
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedAgents.length > 0 && (
+                  <div className="flex justify-center">
+                    <button
+                      onClick={handleContinue}
+                      className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors text-sm font-medium"
+                    >
+                      Continue with {selectedAgents.length} agent{selectedAgents.length > 1 ? 's' : ''}
+                    </button>
+                  </div>
+                )}
+                <div className="text-center">
+                  <p className="text-xs text-gray-500">
+                    Click agents to select/deselect, then click Continue
+                  </p>
+                </div>
+              </div>
+            )}
             
             {isGenerating && (
               <div className="flex justify-start">
@@ -560,12 +799,20 @@ export default function GenerateContentPage() {
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                placeholder="Describe the content you want to generate..."
+                placeholder={
+                  chatFlow === 'subject' 
+                    ? 'Enter the subject or theme...' 
+                    : chatFlow === 'agent'
+                    ? 'Type "continue" when ready...'
+                    : chatFlow === 'photos'
+                    ? 'Enter number of photos (1-10)...'
+                    : 'Describe the content you want to generate...'
+                }
                 className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-sm text-gray-900 placeholder-gray-500"
               />
               <button
                 onClick={handleSendMessage}
-                disabled={!inputMessage.trim() && selectedAssets.length === 0}
+                disabled={!inputMessage.trim() || isGenerating}
                 className="px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
               >
                 <PaperAirplaneIcon className="h-4 w-4" />

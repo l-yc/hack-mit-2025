@@ -187,7 +187,7 @@ export default function AssetsPage() {
             {allTags.map((tag) => (
               <button
                 key={tag}
-                onClick={() => setSelectedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag])}
+                onClick={() => setSelectedTags((prev: string[]) => prev.includes(tag) ? prev.filter((t: string) => t !== tag) : [...prev, tag])}
                 className={`px-3 py-1 rounded-full text-sm transition-colors cursor-pointer ${
                   selectedTags.includes(tag)
                     ? 'bg-purple-500 text-white'
@@ -221,7 +221,7 @@ export default function AssetsPage() {
               <PlusIcon className="h-8 w-8 text-gray-400 group-hover:text-purple-500" />
             )}
             <span className="mt-2 text-xs text-gray-500 group-hover:text-purple-600">
-              {isUploading ? 'Uploading...' : 'Add Asset'}
+              {isUploading ? 'Uploading...' : 'Add Asset(s)'}
             </span>
             <input
               id="file-upload"
