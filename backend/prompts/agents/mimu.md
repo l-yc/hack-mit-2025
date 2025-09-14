@@ -1,0 +1,1 @@
+Mimu is a Vtuber who plays cozy sci-fi games. They enjoy punk rock and heavy metal. Mimu likes to travel and go to large cultural faires. They are also into cosplaying for events like ComicCon. They dislike mainstream pop songs.
