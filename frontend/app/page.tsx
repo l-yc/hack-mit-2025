@@ -3,7 +3,7 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { PlusIcon, MagnifyingGlassIcon, XMarkIcon, TagIcon, ArrowPathIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { useAppContext } from '@/lib/context';
-import { Asset } from '@/types/asset';
+import { Asset, assetService } from '@/lib/asset-service';
 
 export default function AssetsPage() {
   const {
@@ -16,7 +16,7 @@ export default function AssetsPage() {
   } = useAppContext();
   
   const [isUploading, setIsUploading] = useState(false);
-  const [showTagInput, setShowTagInput] = useState<number | null>(null);
+  const [showTagInput, setShowTagInput] = useState<string | null>(null);
   const [newTag, setNewTag] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -30,9 +30,8 @@ export default function AssetsPage() {
   const fetchAssets = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch('/api/assets');
-      const data = await response.json();
-      setAssets(data.assets || []);
+      const assets = await assetService.getAssets({ query: searchQuery, tags: selectedTags });
+      setAssets(assets);
     } catch (error) {
       console.error('Error fetching assets:', error);
     } finally {
@@ -47,108 +46,73 @@ export default function AssetsPage() {
     setIsUploading(true);
     
     try {
-      const formData = new FormData();
-      Array.from(files).forEach(file => {
-        formData.append('files', file);
-      });
-
-      const response = await fetch('/api/assets', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await response.json();
-      if (data.assets) {
-        setAssets(prev => [...prev, ...data.assets]);
+      const result = await assetService.uploadAssets(Array.from(files));
+      setAssets(prev => [...result.assets, ...prev]);
+      
+      if (result.errors && result.errors.length > 0) {
+        console.warn('Some files failed to upload:', result.errors);
+        alert(`Some files failed to upload: ${result.errors.join(', ')}`);
+      }
+      
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
       }
     } catch (error) {
       console.error('Error uploading files:', error);
+      alert('Failed to upload files. Please try again.');
     } finally {
       setIsUploading(false);
     }
   };
 
-  const addTag = async (assetId: number, tag: string) => {
-    const asset = assets.find(a => a.id === assetId);
-    if (!asset) return;
+  const handleAddTag = async (assetId: string) => {
+    if (!newTag.trim()) return;
 
-    const updatedTags = [...asset.tags, tag];
-    
     try {
-      const response = await fetch(`/api/assets/${assetId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags: updatedTags }),
-      });
-
-      const data = await response.json();
-      if (data.asset) {
-        setAssets(prev => prev.map(a => 
-          a.id === assetId ? data.asset : a
-        ));
-      }
+      const currentAsset = assets.find(a => a.id === assetId);
+      if (!currentAsset) return;
+      
+      const updatedTags = [...currentAsset.tags, newTag.trim()];
+      const updatedAsset = await assetService.updateAssetTags(assetId, updatedTags);
+      
+      setAssets(prev => prev.map(asset => 
+        asset.id === assetId ? updatedAsset : asset
+      ));
+      
+      setNewTag('');
+      setShowTagInput(null);
     } catch (error) {
       console.error('Error adding tag:', error);
+      alert('Failed to add tag. Please try again.');
     }
   };
 
-  const removeTag = async (assetId: number, tagToRemove: string) => {
-    const asset = assets.find(a => a.id === assetId);
-    if (!asset) return;
-
-    const updatedTags = asset.tags.filter(tag => tag !== tagToRemove);
-    
+  const handleRemoveTag = async (assetId: string, tagToRemove: string) => {
     try {
-      const response = await fetch(`/api/assets/${assetId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags: updatedTags }),
-      });
+      const asset = assets.find(a => a.id === assetId);
+      if (!asset) return;
 
-      const data = await response.json();
-      if (data.asset) {
-        setAssets(prev => prev.map(a => 
-          a.id === assetId ? data.asset : a
-        ));
-      }
+      const updatedTags = asset.tags.filter(tag => tag !== tagToRemove);
+      const updatedAsset = await assetService.updateAssetTags(assetId, updatedTags);
+      
+      setAssets(prev => prev.map(a => 
+        a.id === assetId ? updatedAsset : a
+      ));
     } catch (error) {
       console.error('Error removing tag:', error);
+      alert('Failed to remove tag. Please try again.');
     }
   };
 
-  const deleteAsset = async (id: number) => {
+  const deleteAsset = async (id: string) => {
     try {
-      const response = await fetch(`/api/assets/${id}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        setAssets(prev => prev.filter(asset => asset.id !== id));
-      } else {
-        console.error('Failed to delete asset');
-      }
+      await assetService.deleteAsset(id);
+      setAssets(prev => prev.filter(asset => asset.id !== id));
     } catch (error) {
       console.error('Error deleting asset:', error);
+      alert('Failed to delete asset. Please try again.');
     }
-  };
-
-  const addTagToAsset = (assetId: string, tag: string) => {
-    if (!tag.trim()) return;
-    setAssets(prev => prev.map(asset => 
-      asset.id === assetId 
-        ? { ...asset, tags: [...asset.tags, tag.trim()] }
-        : asset
-    ));
-    setNewTag('');
-    setShowTagInput(null);
-  };
-
-  const removeTagFromAsset = (assetId: string, tagToRemove: string) => {
-    setAssets(prev => prev.map(asset => 
-      asset.id === assetId 
-        ? { ...asset, tags: asset.tags.filter(tag => tag !== tagToRemove) }
-        : asset
-    ));
   };
 
   // Advanced search filtering
@@ -358,7 +322,7 @@ export default function AssetsPage() {
                   >
                     {tag}
                     <button
-                      onClick={() => removeTagFromAsset(asset.id, tag)}
+                      onClick={() => handleRemoveTag(asset.id, tag)}
                       className="ml-1 hover:text-red-200 cursor-pointer"
                     >
                       <XMarkIcon className="h-3 w-3" />
@@ -385,9 +349,7 @@ export default function AssetsPage() {
                     className="w-full px-2 py-1 pr-16 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-purple-500 focus:border-purple-500 text-gray-900"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && newTag.trim()) {
-                        addTag(asset.id, newTag.trim());
-                        setNewTag('');
-                        setShowTagInput(null);
+                        handleAddTag(asset.id);
                       } else if (e.key === 'Escape') {
                         setNewTag('');
                         setShowTagInput(null);
@@ -399,7 +361,7 @@ export default function AssetsPage() {
                     <button
                       onClick={() => {
                         if (newTag.trim()) {
-                          addTag(asset.id, newTag.trim());
+                          handleAddTag(asset.id);
                           setNewTag('');
                           setShowTagInput(null);
                         }
