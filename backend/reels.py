@@ -458,9 +458,9 @@ def main():
     Example usage of the Instagram Reels Generator
     """
     # API Keys (replace with your actual keys)
-    ANTHROPIC_API_KEY = "your_anthropic_api_key_here"
-    SUNO_API_KEY = "your_suno_api_key_here"  # Optional
-    
+    ANTHROPIC_API_KEY = os.environ["CLAUDE_API_KEY"]
+    SUNO_API_KEY = os.environ["SUNO_API_KEY"]
+
     # Initialize generator
     generator = ReelsGenerator(
         anthropic_api_key=ANTHROPIC_API_KEY,
