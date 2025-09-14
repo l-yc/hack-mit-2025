@@ -28,7 +28,7 @@ except Exception:
 app = Flask(__name__)
 # Configure CORS
 CORS(app, origins=[
-    "https://hackmit-2025-nine.vercel.app/", "localhost:3000", "3.146.82.97:6741"
+    "https://hackmit-2025-nine.vercel.app/", "http://localhost:3000", "http://3.146.82.97:6741"
 ])
 app.config["CORS_HEADERS"] = "Content-Type"
 
