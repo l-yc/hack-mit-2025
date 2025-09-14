@@ -598,6 +598,7 @@ def create_reels_job():
             music_url=data.get("music_url"),
             music_gain_db=float(data.get("music_gain_db", -8.0)),
             duck_music=bool(data.get("duck_music", True)),
+            music_only=bool(data.get("music_only", False)),
         )
         job = job_manager.enqueue(req)
         return jsonify({"job_id": job.id, "status": job.status}), 202

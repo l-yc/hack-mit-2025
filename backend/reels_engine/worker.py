@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from .media import download, download_many, probe
-from .render import center_crop_render, concat_center_crop_render
+from .render import center_crop_render, concat_center_crop_render, add_music_overlay
 from .schemas import Job, JobRequest, ArtifactPaths
 from .utils import ensure_dir, write_json
 
@@ -68,12 +68,23 @@ class JobManager:
 
             # Minimal selection: single vs montage concat
             if job.request.mode == "montage" and len(inputs) > 1:
+                # Disable crossfade for reliability; pure concat path
                 mp4_path, cover_path = concat_center_crop_render(
                     inputs=inputs,
                     output_dir=str(out_dir),
-                    crossfade_sec=0.25,
+                    crossfade_sec=None,
                 )
                 t0, t1 = 0.0, 0.0
+                # If music provided, overlay on top of concatenated video
+                if job.request.music_url:
+                    mp4_path = add_music_overlay(
+                        input_video_path=mp4_path,
+                        output_dir=str(out_dir),
+                        music_path=job.request.music_url,
+                        music_gain_db=job.request.music_gain_db,
+                        duck_music=job.request.duck_music,
+                        music_only=job.request.music_only,
+                    )
             else:
                 local_path = inputs[0]
                 _ = probe(local_path)

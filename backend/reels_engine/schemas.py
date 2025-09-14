@@ -18,6 +18,7 @@ class JobRequest:
     music_url: Optional[str] = None
     music_gain_db: float = -8.0
     duck_music: bool = True
+    music_only: bool = False
     mode: str = "single"
     target_duration_sec: float = 15.0
     min_duration_sec: float = 9.0
