@@ -28,6 +28,7 @@ except Exception:
 app = Flask(__name__)
 # Configure CORS
 CORS(app)
+app.config["CORS_HEADERS"] = "Content-Type"
 
 # Configuration
 UPLOAD_FOLDER = "uploads"
