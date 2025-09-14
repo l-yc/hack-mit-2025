@@ -1,6 +1,7 @@
 import glob
 import os
 import re
+from unittest import result
 import uuid
 import yaml
 import requests
@@ -737,6 +738,7 @@ def select_top_photos():
             "post_type": post_type,
             "selected_photos": result_photos,
             "selection_time": datetime.now().isoformat(),
+            "captions": generate_photo_captions(result_photos, post_type, selection_context)
         }
         
         if recommended_songs:
