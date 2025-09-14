@@ -641,7 +641,7 @@ def select_top_photos():
                 return jsonify({"error": f"No agent files found in {AGENTS_FOLDER}"}), 404
             agents = [Path(agent) for agent in agent_files]
         else:
-            agents = [os.path.join(AGENTS_FOLDER, f"{agent}.md") for agent in agents]
+            agents = [os.path.join(AGENTS_FOLDER, f"{agent}") for agent in agents]
         
         # Validate parameters
         if not isinstance(n_photos, int) or n_photos < 1:
