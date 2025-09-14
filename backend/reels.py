@@ -468,13 +468,7 @@ def main():
     )
     
     # Example image paths (replace with your actual image paths)
-    image_paths = [
-        "photo1.jpg",
-        "photo2.jpg",
-        "photo3.jpg",
-        "photo4.jpg",
-        "photo5.jpg"
-    ]
+    image_paths = Path(__file__).parent / "uploads"
     
     try:
         # Generate the reel

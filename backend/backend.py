@@ -630,6 +630,17 @@ def select_top_photos():
         n_photos = data.get("n", 2)
         img_dir = data.get("directory", UPLOAD_FOLDER)
         post_type = data.get("post_type", "Instagram Story for a fun philosophy club.")
+        agents = data.get("agents", None)
+
+        if agents is None:
+            # Get available agents
+            agent_files = glob.glob(os.path.join(AGENTS_FOLDER, "*.md"))
+            if not agent_files:
+                return jsonify({"error": f"No agent files found in {AGENTS_FOLDER}"}), 404
+
+            agents = [Path(agent) for agent in agent_files]
+        else:
+            agents = [os.path.join(AGENTS_FOLDER, f"{agent}.md") for agent in agents]
 
         # Validate parameters
         if not isinstance(n_photos, int) or n_photos < 1:
@@ -641,13 +652,6 @@ def select_top_photos():
         # Check if directory exists
         if not os.path.exists(img_dir):
             return jsonify({"error": f"Directory not found: {img_dir}"}), 404
-
-        # Get available agents
-        agent_files = glob.glob(os.path.join(AGENTS_FOLDER, "*.md"))
-        if not agent_files:
-            return jsonify({"error": f"No agent files found in {AGENTS_FOLDER}"}), 404
-
-        agents = [Path(agent) for agent in agent_files]
 
         # Check for required API key
         if not os.environ.get("CLAUDE_API_KEY"):
