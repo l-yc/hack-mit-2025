@@ -1,7 +1,9 @@
 import os
+import functools
 import glob
-from typing import Optional, List, Dict, Any, Iterator
 import io
+
+from typing import Optional, List, Dict, Any, Iterator
 
 import base64
 import mimetypes
@@ -51,6 +53,7 @@ def downsample_image_to_480p(image_path: str) -> bytes:
         img.save(buffer, format='JPEG', quality=85, optimize=True)
         return buffer.getvalue()
 
+@functools.cache
 def encode_image(image_path: str) -> tuple[str, str]:
     """
     Encode an image file to base64 and determine its MIME type, with 480p downsampling.
