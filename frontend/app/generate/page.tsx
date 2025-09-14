@@ -159,10 +159,12 @@ export default function GenerateContentPage() {
         timestamp: new Date(),
       };
       
-      // Different messaging for Stories vs Posts
+      // Different messaging for Stories vs Posts/Reels
       const continueMessage = selectedContentType?.id === 'instagram-story'
         ? `Excellent! You've selected ${agentNames} for your story. For Instagram Stories, I recommend 3-7 photos to create a compelling narrative sequence. How many photos would you like? (3-7 recommended)`
-        : `Perfect! You've selected ${agentNames}. Now, how many photos would you like me to select? (1-10)`;
+        : selectedContentType?.id === 'instagram-reel'
+          ? `Great choice: ${agentNames}. How many video clips would you like me to use? (1-5)`
+          : `Perfect! You've selected ${agentNames}. Now, how many photos would you like me to select? (1-10)`;
       
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
@@ -216,6 +218,13 @@ export default function GenerateContentPage() {
           content: `Perfect! Creating a story about "${currentInput}". For Instagram Stories, we'll create a sequence that tells a compelling narrative. Which AI agent would you like to use for photo selection?`,
           timestamp: new Date(),
         };
+      } else if (selectedContentType?.id === 'instagram-reel') {
+        aiResponse = {
+          id: (Date.now() + 1).toString(),
+          type: 'assistant',
+          content: `Awesome! We'll create a Reel about "${currentInput}". Choose agents to guide the style, then tell me how many video clips to use (1-5).`,
+          timestamp: new Date(),
+        };
       } else {
         aiResponse = {
           id: (Date.now() + 1).toString(),
@@ -231,12 +240,19 @@ export default function GenerateContentPage() {
         if (selectedAgents.length > 0) {
           const agentNames = selectedAgents.map(a => a.name.replace('.md', '')).join(', ');
           
-          // Different messaging for Stories vs Posts
+          // Different messaging for Stories vs Posts/Reels
           if (selectedContentType?.id === 'instagram-story') {
             aiResponse = {
               id: (Date.now() + 1).toString(),
               type: 'assistant',
               content: `Excellent! You've selected ${agentNames} for your story. For Instagram Stories, I recommend 3-7 photos to create a compelling narrative sequence. How many photos would you like? (3-7 recommended)`,
+              timestamp: new Date(),
+            };
+          } else if (selectedContentType?.id === 'instagram-reel') {
+            aiResponse = {
+              id: (Date.now() + 1).toString(),
+              type: 'assistant',
+              content: `Great choice: ${agentNames}. How many video clips would you like me to use? (1-5)`,
               timestamp: new Date(),
             };
           } else {
@@ -296,18 +312,55 @@ export default function GenerateContentPage() {
     } else if (chatFlow === 'photos') {
       const photoCount = parseInt(currentInput);
       
-      // Different validation for Stories vs Posts
+      // Different validation for Stories vs Posts/Reels
+      const isReel = selectedContentType?.id === 'instagram-reel';
       const isValidCount = selectedContentType?.id === 'instagram-story' 
         ? (photoCount >= 1 && photoCount <= 10) // Stories can have 1-10 photos
-        : (photoCount >= 1 && photoCount <= 10);
+        : isReel
+          ? (photoCount >= 1 && photoCount <= 5) // Reels: 1-5 clips
+          : (photoCount >= 1 && photoCount <= 10);
       
       if (isValidCount) {
         setNumPhotos(photoCount);
         setChatFlow('generating');
         
-        // Call the /select API to get photos
+        // For reels: select videos from assets; otherwise call /select for photos
         try {
-          const response = await fetch(`${process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741'}/select`, {
+          if (isReel) {
+            // Fetch available videos from backend
+            const vidsRes = await fetch(`${process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741'}/videos`);
+            const vidsJson = await vidsRes.json();
+            const availableVideos = (vidsJson?.videos || []).map((v: any) => ({
+              id: v.filename,
+              name: v.filename,
+              url: `${process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741'}${v.file_url}`,
+              type: 'video/mp4',
+              size: v.size_bytes,
+              tags: [],
+              metadata: {},
+              created_at: v.modified_time,
+            }));
+            if (availableVideos.length === 0) {
+              aiResponse = {
+                id: (Date.now() + 1).toString(),
+                type: 'assistant',
+                content: 'I could not find any uploaded videos. Please upload some clips in the Assets tab and try again.',
+                timestamp: new Date(),
+              };
+              setChatFlow('photos');
+            } else {
+              const chosen = availableVideos.slice(0, photoCount);
+              setSelectedAssets(chosen as any);
+              aiResponse = {
+                id: (Date.now() + 1).toString(),
+                type: 'assistant',
+                content: `Selected ${chosen.length} video clip(s) for your Reel. You can preview them above.`,
+                timestamp: new Date(),
+              };
+              setChatFlow('complete');
+            }
+          } else {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741'}/select`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -318,7 +371,7 @@ export default function GenerateContentPage() {
               agents: selectedAgents.map(agent => agent.path),
               auto_cleanup: false,
             }),
-          });
+            });
 
           const data = await response.json();
           
@@ -380,6 +433,7 @@ export default function GenerateContentPage() {
             };
             setChatFlow('photos');
           }
+          }
         } catch (error) {
           console.error('Error calling /select API:', error);
           aiResponse = {
@@ -391,10 +445,12 @@ export default function GenerateContentPage() {
           setChatFlow('photos');
         }
       } else {
-        // Different error messages for Stories vs Posts
+        // Different error messages for Stories vs Posts/Reels
         const errorMessage = selectedContentType?.id === 'instagram-story'
           ? 'Please enter a number between 1 and 10. For Stories, I recommend 3-7 photos for the best narrative flow.'
-          : 'Please enter a number between 1 and 10 for the number of photos.';
+          : isReel
+            ? 'Please enter a number between 1 and 5 for the number of clips.'
+            : 'Please enter a number between 1 and 10 for the number of photos.';
           
         aiResponse = {
           id: (Date.now() + 1).toString(),

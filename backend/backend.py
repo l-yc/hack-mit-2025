@@ -845,6 +845,35 @@ def list_photos():
         return jsonify({"error": f"Failed to list photos: {str(e)}"}), 500
 
 
+@app.route("/videos", methods=["GET"])
+def list_videos():
+    """List uploaded videos (mp4/mov/m4v/webm)"""
+    try:
+        video_exts = {"mp4", "mov", "m4v", "webm"}
+        videos = []
+        for filename in os.listdir(app.config["UPLOAD_FOLDER"]):
+            file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+            if os.path.isfile(file_path):
+                ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+                if ext in video_exts:
+                    stat = os.stat(file_path)
+                    videos.append(
+                        {
+                            "filename": filename,
+                            "size_bytes": stat.st_size,
+                            "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                            "file_url": f"/videos/{filename}",
+                        }
+                    )
+
+        return jsonify({
+            "videos": sorted(videos, key=lambda x: x["modified_time"], reverse=True),
+            "total_count": len(videos),
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"Failed to list videos: {str(e)}"}), 500
+
+
 @app.route("/photos/<path:filename>", methods=["DELETE"])
 def delete_photo(filename):
     """Delete a specific photo"""
