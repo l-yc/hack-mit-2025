@@ -27,11 +27,22 @@ except Exception:
 
 app = Flask(__name__)
 # Configure CORS
-CORS(app, origins=[
-    "https://hackmit-2025-nine.vercel.app", "http://localhost:3000", "http://3.146.82.97:6741",
-    "http://hackmit-2025-nine.vercel.app"
-])
-app.config["CORS_HEADERS"] = "Content-Type"
+allowed = [
+    "https://hackmit-2025-nine.vercel.app",
+    "http://localhost:3000",
+]
+preview_regex = re.compile(r"^https://.*\.vercel\.app$")
+CORS(
+    app,
+    resources={r"/*": {
+        "origins": allowed + [preview_regex],
+        "methods": ["GET", "POST", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        # set to True only if you actually use cookies/auth:
+        "supports_credentials": False
+    }}
+)
+
 
 # Configuration
 UPLOAD_FOLDER = "uploads"
