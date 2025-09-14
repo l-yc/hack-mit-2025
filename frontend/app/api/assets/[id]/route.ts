@@ -3,11 +3,12 @@ import { updateAssetTags, deleteAsset } from '@/lib/db-direct';
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { tags } = await request.json();
-    const assetId = parseInt(params.id);
+    const resolvedParams = await params;
+    const assetId = parseInt(resolvedParams.id);
 
     if (isNaN(assetId)) {
       return NextResponse.json({ error: 'Invalid asset ID' }, { status: 400 });
@@ -23,10 +24,11 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const assetId = parseInt(params.id);
+    const resolvedParams = await params;
+    const assetId = parseInt(resolvedParams.id);
 
     if (isNaN(assetId)) {
       return NextResponse.json({ error: 'Invalid asset ID' }, { status: 400 });

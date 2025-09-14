@@ -47,7 +47,7 @@ export default function AssetsPage() {
     
     try {
       const result = await assetService.uploadAssets(Array.from(files));
-      setAssets(prev => [...result.assets, ...prev]);
+      setAssets([...result.assets, ...assets]);
       
       if (result.errors && result.errors.length > 0) {
         console.warn('Some files failed to upload:', result.errors);
@@ -76,7 +76,7 @@ export default function AssetsPage() {
       const updatedTags = [...currentAsset.tags, newTag.trim()];
       const updatedAsset = await assetService.updateAssetTags(assetId, updatedTags);
       
-      setAssets(prev => prev.map(asset => 
+      setAssets(assets.map(asset => 
         asset.id === assetId ? updatedAsset : asset
       ));
       
@@ -96,7 +96,7 @@ export default function AssetsPage() {
       const updatedTags = asset.tags.filter(tag => tag !== tagToRemove);
       const updatedAsset = await assetService.updateAssetTags(assetId, updatedTags);
       
-      setAssets(prev => prev.map(a => 
+      setAssets(assets.map(a => 
         a.id === assetId ? updatedAsset : a
       ));
     } catch (error) {
@@ -108,7 +108,7 @@ export default function AssetsPage() {
   const deleteAsset = async (id: string) => {
     try {
       await assetService.deleteAsset(id);
-      setAssets(prev => prev.filter(asset => asset.id !== id));
+      setAssets(assets.filter(asset => asset.id !== id));
     } catch (error) {
       console.error('Error deleting asset:', error);
       alert('Failed to delete asset. Please try again.');
@@ -187,7 +187,7 @@ export default function AssetsPage() {
             {allTags.map((tag) => (
               <button
                 key={tag}
-                onClick={() => setSelectedTags((prev: string[]) => prev.includes(tag) ? prev.filter((t: string) => t !== tag) : [...prev, tag])}
+                onClick={() => setSelectedTags(selectedTags.includes(tag) ? selectedTags.filter((t: string) => t !== tag) : [...selectedTags, tag])}
                 className={`px-3 py-1 rounded-full text-sm transition-colors cursor-pointer ${
                   selectedTags.includes(tag)
                     ? 'bg-purple-500 text-white'

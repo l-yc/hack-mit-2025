@@ -46,7 +46,7 @@ export abstract class AssetService {
 export class FlaskAssetService extends AssetService {
   private baseUrl: string;
 
-  constructor(baseUrl: string = process.env.NEXT_PUBLIC_FLASK_BACKEND_URL) {
+  constructor(baseUrl: string = process.env.NEXT_PUBLIC_FLASK_BACKEND_URL || 'http://localhost:6741') {
     super();
     this.baseUrl = baseUrl;
   }

@@ -48,9 +48,9 @@ export async function POST(request: NextRequest) {
       const filepath = path.join(process.cwd(), 'public/uploads', filename);
       
       // Compress image using sharp
-      let processedBuffer = buffer;
+      let processedBuffer: Buffer = buffer;
       if (file.type.startsWith('image/')) {
-        processedBuffer = await sharp(buffer)
+        processedBuffer = await sharp(buffer as Buffer)
           .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 80 })
           .toBuffer();
