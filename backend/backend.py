@@ -18,6 +18,8 @@ from werkzeug.utils import secure_filename
 
 from PIL import Image
 
+from .image_editor import cleanup_image
+
 try:
     # Load .env if present
     from dotenv import load_dotenv
@@ -27,14 +29,7 @@ except Exception:
 
 app = Flask(__name__)
 # Configure CORS
-CORS(app, origins=[
-    "http://localhost:3000",  # React development server
-    "http://localhost:8080",  # Alternative dev server
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:8080",
-    # Add your production frontend URLs here
-    "http://3.146.82.97:6741"
-])
+CORS(app)
 
 # Configuration
 UPLOAD_FOLDER = "uploads"
