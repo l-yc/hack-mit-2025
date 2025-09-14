@@ -328,7 +328,7 @@ def images_cleanup():
     pointing to an image already present in uploads/.
     """
     try:
-        from image_editor import cleanup_image
+        from backend.image_editor import cleanup_image
     except Exception as e:
         return jsonify({"error": f"Imagen integration unavailable: {str(e)}"}), 500
 
@@ -410,7 +410,7 @@ def images_edit():
     Or JSON: {'filename': '...', 'prompt': '...', 'mask_filename': 'optional'}
     """
     try:
-        from image_editor import edit_image_with_prompt
+        from backend.image_editor import edit_image_with_prompt
     except Exception as e:
         return jsonify({"error": f"Imagen integration unavailable: {str(e)}"}), 500
 
@@ -1022,27 +1022,214 @@ def parse_song_text_response(songs_text):
     return songs
 
 
-def format_song_recommendations(recommendations):
-    """Format and validate song recommendations"""
-    formatted = []
+def generate_photo_captions(photo_paths, post_type, selection_context):
+    """Generate coherent captions for selected photos"""
+    try:
+        # Create caption generation prompt
+        caption_prompt = create_caption_prompt(photo_paths, post_type, selection_context)
+        
+        # Get captions from Claude API
+        captions_response = query_claude_for_captions(caption_prompt)
+        
+        # Format and validate captions
+        formatted_captions = format_photo_captions(captions_response, photo_paths)
+        
+        return formatted_captions
+        
+    except Exception as e:
+        raise Exception(f"Failed to generate captions: {str(e)}")
+
+
+def create_caption_prompt(photo_paths, post_type, selection_context):
+    """Create a prompt for generating coherent photo captions"""
     
-    for song in recommendations:
-        # Ensure required fields exist
-        formatted_song = {
-            "title": song.get("title", "Unknown Title"),
-            "artist": song.get("artist", "Unknown Artist"), 
-            "genre": song.get("genre", "Unknown Genre"),
-            "coherence_reason": song.get("coherence_reason", "Complements photo selection"),
-            "energy_level": song.get("energy_level", 5),
-            "mood_keywords": song.get("mood_keywords", []),
-            "target_moment": song.get("target_moment", "Overall accompaniment"),
-            "platform_appropriate": song.get("platform_appropriate", True),
-            "licensing_note": song.get("licensing_note", "Check platform licensing requirements")
+    agent_context = ""
+    for agent_name, description in selection_context['agent_descriptions'].items():
+        # Extract key characteristics from agent descriptions for captioning
+        agent_summary = extract_agent_caption_style(description)
+        agent_context += f"- {agent_name}: {agent_summary}\n"
+    
+    prompt = f"""
+    Generate captions for {len(photo_paths)} selected photos that create coherence for this collection.
+
+    CONTEXT:
+    - Post Type: {post_type}
+    - Selection Agents Used: {list(selection_context['agent_descriptions'].keys())}
+    - Selection Reasoning: {selection_context['selection_reasoning']}
+
+    AGENT CAPTION STYLES:
+    {agent_context}
+
+    CAPTION REQUIREMENTS:
+    1. Each caption should complement the overall narrative of the photo collection
+    2. Maintain consistent tone and style across all captions
+    3. Reference themes identified by the selection agents
+    4. Be appropriate for the platform and audience of "{post_type}"
+    5. Create flow and connection between photos when read sequentially
+    6. Length: 1-2 sentences per caption, suitable for social media
+
+    PHOTO SEQUENCE:
+    {[f"Photo {i+1}: {os.path.basename(path)}" for i, path in enumerate(photo_paths)]}
+
+    For each photo, provide:
+    {{
+        "filename": "exact_filename.jpg",
+        "caption": "The actual caption text",
+        "caption_style": "tone/style used",
+        "connection_to_theme": "how this caption connects to overall theme",
+        "sequence_role": "role in the photo sequence (opening, middle, conclusion, etc.)"
+    }}
+
+    Focus on creating captions that:
+    - Work individually but flow together as a sequence
+    - Reflect the sophistication level of the selection agents
+    - Support the intended use case of "{post_type}"
+    - Enhance rather than compete with any potential musical accompaniment
+
+    Return as valid JSON array.
+    """
+    
+    return prompt
+
+
+def extract_agent_caption_style(agent_description):
+    """Extract caption style preferences from agent description"""
+    style_indicators = {
+        "professional": "formal, polished captions",
+        "casual": "informal, friendly tone",
+        "aesthetic": "artistic, descriptive language", 
+        "modern": "contemporary, trendy language",
+        "classical": "timeless, elegant phrasing",
+        "energetic": "dynamic, action-oriented captions",
+        "contemplative": "thoughtful, reflective tone",
+        "social": "engaging, shareable content",
+        "technical": "precise, informative descriptions",
+        "creative": "imaginative, expressive language"
+    }
+    
+    description_lower = agent_description.lower()
+    found_styles = []
+    
+    for keyword, style_implication in style_indicators.items():
+        if keyword in description_lower:
+            found_styles.append(style_implication)
+    
+    return "; ".join(found_styles) if found_styles else "adaptable caption style"
+
+
+def query_claude_for_captions(prompt):
+    """Query Claude API for photo captions"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {os.environ.get('CLAUDE_API_KEY')}",
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
         }
         
-        formatted.append(formatted_song)
+        payload = {
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 2000
+        }
+        
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            captions_text = result["content"][0]["text"]
+            
+            # Extract JSON from the response
+            try:
+                start_idx = captions_text.find('[')
+                end_idx = captions_text.rfind(']') + 1
+                if start_idx != -1 and end_idx != 0:
+                    json_str = captions_text[start_idx:end_idx]
+                    captions = json.loads(json_str)
+                    return captions
+                else:
+                    return json.loads(captions_text)
+            except json.JSONDecodeError:
+                return parse_caption_text_response(captions_text)
+                
+        else:
+            raise Exception(f"Claude API error: {response.status_code} - {response.text}")
+            
+    except Exception as e:
+        raise Exception(f"Claude query for captions failed: {str(e)}")
+
+
+def parse_caption_text_response(captions_text):
+    """Fallback parser for non-JSON caption responses"""
+    captions = []
+    lines = captions_text.split('\n')
     
-    return formatted
+    current_caption = {}
+    for line in lines:
+        line = line.strip()
+        if 'filename:' in line.lower() or 'photo' in line.lower():
+            if current_caption:
+                captions.append(current_caption)
+            # Extract filename from line
+            if 'filename:' in line.lower():
+                current_caption = {"filename": line.split(':', 1)[1].strip()}
+            else:
+                current_caption = {"filename": f"photo_{len(captions) + 1}"}
+        elif 'caption:' in line.lower():
+            current_caption["caption"] = line.split(':', 1)[1].strip()
+        elif 'style:' in line.lower():
+            current_caption["caption_style"] = line.split(':', 1)[1].strip()
+    
+    if current_caption:
+        captions.append(current_caption)
+    
+    return captions
+
+
+def format_photo_captions(captions_response, photo_paths):
+    """Format and validate photo captions"""
+    formatted_captions = {}
+    
+    # Create filename mapping
+    filenames = [os.path.basename(path) for path in photo_paths]
+    
+    for i, caption_data in enumerate(captions_response):
+        if isinstance(caption_data, dict):
+            filename = caption_data.get("filename", "")
+            caption_text = caption_data.get("caption", "")
+            
+            # Match filename to actual files
+            if filename in filenames:
+                formatted_captions[filename] = {
+                    "text": caption_text,
+                    "style": caption_data.get("caption_style", ""),
+                    "theme_connection": caption_data.get("connection_to_theme", ""),
+                    "sequence_role": caption_data.get("sequence_role", "")
+                }
+            elif i < len(filenames):
+                # Fallback to index matching
+                formatted_captions[filenames[i]] = {
+                    "text": caption_text,
+                    "style": caption_data.get("caption_style", ""),
+                    "theme_connection": caption_data.get("connection_to_theme", ""), 
+                    "sequence_role": caption_data.get("sequence_role", "")
+                }
+    
+    # Ensure all photos have captions, even if just basic ones
+    for filename in filenames:
+        if filename not in formatted_captions:
+            formatted_captions[filename] = {
+                "text": f"Selected for {formatted_captions.get('post_type', 'sharing')}",
+                "style": "default",
+                "theme_connection": "part of curated collection",
+                "sequence_role": "supporting image"
+            }
+    
+    return formatted_captions
 
 
 @app.route("/agents", methods=["GET"])

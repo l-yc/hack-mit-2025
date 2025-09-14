@@ -35,7 +35,7 @@ def test_cleanup_image_calls_model_and_saves(mocker, tmp_path, monkeypatch):
     mock_generated.save.side_effect = _save
     mock_model.edit_image.return_value = [mock_generated]
 
-    from image_editor import cleanup_image
+    from backend.image_editor import cleanup_image
 
     result = cleanup_image(input_path=input_path, output_dir=str(tmp_path / "out"), prompt="clean")
     assert os.path.exists(result.output_path)
@@ -45,7 +45,7 @@ def test_cleanup_image_calls_model_and_saves(mocker, tmp_path, monkeypatch):
 
 
 def test_edit_image_with_prompt_requires_prompt(mocker, tmp_path, monkeypatch):
-    from image_editor import edit_image_with_prompt
+    from backend.image_editor import edit_image_with_prompt
     input_path = _save_temp_image(tmp_path, "in.jpg")
     monkeypatch.setenv("GCP_PROJECT", "test-project")
 
@@ -57,7 +57,7 @@ def test_edit_image_with_prompt_requires_prompt(mocker, tmp_path, monkeypatch):
 
 
 def test_edit_image_with_mask_calls_model(mocker, tmp_path, monkeypatch):
-    from image_editor import edit_image_with_prompt
+    from backend.image_editor import edit_image_with_prompt
 
     input_path = _save_temp_image(tmp_path, "in.jpg")
     mask_path = _save_temp_image(tmp_path, "mask.png")
