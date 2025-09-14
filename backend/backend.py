@@ -946,7 +946,7 @@ def query_claude_for_songs(prompt):
     """Query Claude API for song recommendations"""
     try:
         headers = {
-            "Authorization": f"Bearer {os.environ.get('CLAUDE_API_KEY')}",
+            "x-api-key": os.environ.get('CLAUDE_API_KEY'),
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01"
         }
@@ -1116,7 +1116,7 @@ def query_claude_for_captions(prompt):
     """Query Claude API for photo captions"""
     try:
         headers = {
-            "Authorization": f"Bearer {os.environ.get('CLAUDE_API_KEY')}",
+            "x-api-key": os.environ.get('CLAUDE_API_KEY'),
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01"
         }
