@@ -62,31 +62,11 @@ except Exception:
     pass
 
 app = Flask(__name__)
-# Configure CORS
-allowed_origins = [
-    "https://hackmit-2025-nine.vercel.app",
-    "http://hackmit-2025-nine.vercel.app",
-    "http://localhost:3000",
-    "https://localhost:3000",  # Add HTTPS localhost
-    "http://localhost:6741",   # Add backend port
-    "https://localhost:6741",  # Add HTTPS backend port
-]
-
-# Add environment-specific origins
-if os.environ.get("CORS_ORIGINS"):
-    additional_origins = [origin.strip() for origin in os.environ.get("CORS_ORIGINS", "").split(",")]
-    allowed_origins.extend(additional_origins)
 
 preview_regex = re.compile(r"^https://.*\.vercel\.app$")
 
 # Configure CORS with HTTPS support
-CORS(
-    app,
-    origins=allowed_origins,
-    supports_credentials=True,
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
-    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-)
+CORS(app)
 
 
 # Configuration
