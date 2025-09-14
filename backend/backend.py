@@ -757,7 +757,7 @@ def select_top_photos():
             "directory": img_dir,
             "post_type": post_type,
             "selected_photos": result_photos,
-            "photo_captions": photo_captions,
+            "photo_captions": str(photo_captions),
             "selection_time": datetime.now().isoformat(),
         }
         
