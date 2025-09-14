@@ -965,7 +965,7 @@ def query_claude_for_songs(prompt):
         }
         
         payload = {
-            "model": "claude-3-5-sonnet-20241022",
+            "model": "claude-3-5-haiku-latest",
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 3000
         }
@@ -1135,7 +1135,7 @@ def query_claude_for_captions(prompt):
         }
         
         payload = {
-            "model": "claude-3-5-sonnet-20241022",
+            "model": "claude-3-5-haiku-latest",
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 2000
         }
