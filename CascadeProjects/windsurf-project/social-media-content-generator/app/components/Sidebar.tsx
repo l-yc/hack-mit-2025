@@ -29,7 +29,7 @@ export default function Sidebar() {
         )}
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+          className="p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 hover:cursor-pointer"
         >
           {collapsed ? (
             <ChevronRightIcon className="h-5 w-5" />
